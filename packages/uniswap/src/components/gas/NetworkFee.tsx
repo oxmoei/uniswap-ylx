@@ -1,4 +1,5 @@
 import { Currency, CurrencyAmount } from '@uniswap/sdk-core'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Flex, Text, UniswapXText } from 'ui/src'
 import { UniswapX } from 'ui/src/components/icons/UniswapX'
@@ -36,12 +37,62 @@ export function NetworkFee({
 }): JSX.Element {
   const { t } = useTranslation()
 
+  // 如果没有 gasFee.displayValue，提供一个基于链的默认估算值
+  const gasFeeWithFallback = useMemo(() => {
+    if (gasFee.displayValue || gasFee.value) {
+      return gasFee
+    }
+    
+    // 基于链的默认 USD 估算值
+    const defaultGasFeeUSDByChain: Record<number, string> = {
+      1: '0.50', // Ethereum Mainnet
+      8453: '0.10', // Base
+      10: '0.20', // Optimism
+      42161: '0.20', // Arbitrum
+      137: '0.10', // Polygon
+      56: '0.20', // BSC
+      143: '0.05', //Monad
+    }
+    
+    const defaultGasFeeUSD = defaultGasFeeUSDByChain[chainId]
+    if (defaultGasFeeUSD) {
+      // 创建一个带有估算值的 gasFee 对象
+      // 注意：这里我们只设置 displayValue，让 useGasFeeFormattedDisplayAmounts 来处理格式化
+      return {
+        ...gasFee,
+        displayValue: undefined, // 保持 undefined，让 useGasFeeFormattedDisplayAmounts 使用 placeholder
+      }
+    }
+    
+    return gasFee
+  }, [gasFee, chainId])
+
   const { gasFeeFormatted, gasFeeUSD } = useGasFeeFormattedDisplayAmounts({
-    gasFee,
+    gasFee: gasFeeWithFallback,
     chainId,
     placeholder: '-',
     includesDelegation,
   })
+  
+  // 如果没有格式化的 gas 费用，使用基于链的默认估算值
+  const finalGasFeeFormatted = useMemo(() => {
+    if (gasFeeFormatted && gasFeeFormatted !== '-') {
+      return gasFeeFormatted
+    }
+    
+    // 基于链的默认 USD 估算值
+    const defaultGasFeeUSDByChain: Record<number, string> = {
+      1: '<US$0.50', // Ethereum Mainnet
+      8453: '<US$0.10', // Base
+      10: '<US$0.20', // Optimism
+      42161: '<US$0.20', // Arbitrum
+      137: '<US$0.10', // Polygon
+      56: '<US$0.20', // BSC
+      143: '<US$0.05', //Monad
+    }
+    
+    return defaultGasFeeUSDByChain[chainId] ?? '-'
+  }, [gasFeeFormatted, chainId])
 
   const uniswapXGasFeeInfo = useFormattedUniswapXGasFeeInfo(uniswapXGasBreakdown, chainId)
 
@@ -77,7 +128,7 @@ export function NetworkFee({
                 color={gasFee.isLoading ? '$neutral3' : showHighGasFeeUI ? '$statusCritical' : '$neutral1'}
                 variant="body3"
               >
-                {gasFeeFormatted}
+                {finalGasFeeFormatted}
               </Text>
             )}
           </Flex>

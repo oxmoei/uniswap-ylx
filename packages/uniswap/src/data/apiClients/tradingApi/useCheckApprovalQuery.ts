@@ -8,6 +8,9 @@ import { uniswapUrls } from 'uniswap/src/constants/urls'
 import { TradingApiClient } from 'uniswap/src/data/apiClients/tradingApi/TradingApiClient'
 import { ReactQueryCacheKey } from 'utilities/src/reactQuery/cache'
 
+// Trading API 已禁用标志
+const IS_TRADING_API_DISABLED = true
+
 export function useCheckApprovalQuery({
   params,
   ...rest
@@ -19,7 +22,8 @@ export function useCheckApprovalQuery({
 
   return useQueryWithImmediateGarbageCollection<TradingApi.ApprovalResponse>({
     queryKey,
-    queryFn: params
+    // Skip API call when Trading API is disabled
+    queryFn: params && !IS_TRADING_API_DISABLED
       ? async (): ReturnType<typeof TradingApiClient.fetchCheckApproval> =>
           await TradingApiClient.fetchCheckApproval(params)
       : skipToken,

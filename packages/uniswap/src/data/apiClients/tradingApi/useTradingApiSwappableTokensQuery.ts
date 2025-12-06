@@ -14,6 +14,9 @@ import { logger } from 'utilities/src/logger/logger'
 import { ReactQueryCacheKey } from 'utilities/src/reactQuery/cache'
 import { MAX_REACT_QUERY_CACHE_TIME_MS } from 'utilities/src/time/time'
 
+// Trading API 已禁用标志
+const IS_TRADING_API_DISABLED = true
+
 export function useTradingApiSwappableTokensQuery({
   params,
   ...rest
@@ -25,7 +28,8 @@ export function useTradingApiSwappableTokensQuery({
 
   return useQuery<TradingApi.GetSwappableTokensResponse>({
     queryKey,
-    queryFn: params ? swappableTokensQueryFn(params) : skipToken,
+    // Skip API call when Trading API is disabled
+    queryFn: params && !IS_TRADING_API_DISABLED ? swappableTokensQueryFn(params) : skipToken,
     // In order for `getSwappableTokensQueryData` to be more likely to have cached data,
     // we set the `gcTime` to the longest possible time.
     gcTime: MAX_REACT_QUERY_CACHE_TIME_MS,
@@ -49,6 +53,11 @@ export function usePrefetchSwappableTokens(input: Maybe<TradeableAsset>): void {
   const queryClient = useQueryClient()
 
   useEffect(() => {
+    // Skip prefetch when Trading API is disabled
+    if (IS_TRADING_API_DISABLED) {
+      return
+    }
+
     const prefetchSwappableTokens = async (): Promise<void> => {
       const tokenIn = input?.address ? getTokenAddressFromChainForTradingApi(input.address, input.chainId) : undefined
       const tokenInChainId = toTradingApiSupportedChainId(input?.chainId)

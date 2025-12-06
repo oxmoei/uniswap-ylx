@@ -67,7 +67,7 @@ export function SwapDetails({
   const { t } = useTranslation()
 
   const isBridgeTrade = derivedSwapInfo.trade.trade && isBridge(derivedSwapInfo.trade.trade)
-  const routing = derivedSwapInfo.trade.trade?.routing
+  const routing = derivedSwapInfo.trade.trade?.routing ?? TradingApi.Routing.CLASSIC
 
   const trade = derivedSwapInfo.trade.trade ?? derivedSwapInfo.trade.indicativeTrade
   const acceptedTrade = acceptedDerivedSwapInfo.trade.trade ?? acceptedDerivedSwapInfo.trade.indicativeTrade
@@ -76,13 +76,9 @@ export function SwapDetails({
 
   const showUnichainPoweredMessage = useIsUnichainFlashblocksEnabled(derivedSwapInfo.chainId)
 
-  if (!trade) {
-    throw new Error('Invalid render of `SwapDetails` with no `trade`')
-  }
-
-  if (!acceptedTrade) {
-    throw new Error('Invalid render of `SwapDetails` with no `acceptedTrade`')
-  }
+  // 即使没有 trade，也允许显示详细信息
+  const hasTrade = !!trade
+  const hasAcceptedTrade = !!acceptedTrade
 
   const estimatedSwapTime: number | undefined = useMemo(() => {
     const tradeQuote = derivedSwapInfo.trade.trade?.quote
@@ -101,11 +97,29 @@ export function SwapDetails({
     return undefined
   }, [derivedSwapInfo.trade.trade?.quote])
 
+  // 获取输入和输出代币信息
+  const inputCurrency = derivedSwapInfo.currencies.input?.currency
+  const outputCurrency = derivedSwapInfo.currencies.output?.currency
+
+  // 如果没有 trade，计算默认的费用（0.25%）
+  const defaultSwapFeeUsd = useMemo(() => {
+    if (swapFeeUsd !== undefined) {
+      return swapFeeUsd
+    }
+    // 如果没有 swapFeeUsd，基于输出金额计算 0.25% 的费用
+    const outputAmount = derivedSwapInfo.currencyAmounts[CurrencyField.OUTPUT]
+    const outputAmountUSD = derivedSwapInfo.currencyAmountsUSDValue[CurrencyField.OUTPUT]
+    if (outputAmountUSD) {
+      return parseFloat(outputAmountUSD.toExact()) * 0.0025 // 0.25%
+    }
+    return undefined
+  }, [swapFeeUsd, derivedSwapInfo.currencyAmounts, derivedSwapInfo.currencyAmountsUSDValue])
+
   return (
     <HeightAnimator animationDisabled={isMobileApp || isMobileWeb}>
       <TransactionDetails
         banner={
-          newTradeRequiresAcceptance && (
+          hasAcceptedTrade && newTradeRequiresAcceptance && (
             <AcceptNewQuoteRow
               acceptedDerivedSwapInfo={acceptedDerivedSwapInfo}
               derivedSwapInfo={derivedSwapInfo}
@@ -113,17 +127,18 @@ export function SwapDetails({
             />
           )
         }
-        chainId={acceptedTrade.inputAmount.currency.chainId}
+        chainId={derivedSwapInfo.chainId}
         feeOnTransferProps={feeOnTransferProps}
         tokenWarningProps={tokenWarningProps}
         tokenWarningChecked={tokenWarningChecked}
         setTokenWarningChecked={setTokenWarningChecked}
         gasFee={gasFee}
-        swapFee={acceptedTrade.swapFee}
-        swapFeeUsd={swapFeeUsd}
-        indicative={acceptedTrade.indicative}
-        outputCurrency={acceptedTrade.outputAmount.currency}
+        swapFee={hasAcceptedTrade ? acceptedTrade.swapFee : undefined}
+        swapFeeUsd={defaultSwapFeeUsd}
+        indicative={hasAcceptedTrade ? acceptedTrade.indicative : false}
+        outputCurrency={outputCurrency}
         showExpandedChildren={!!customSlippageTolerance}
+        showSeparatorToggle={true}
         showNetworkLogo={!showUnichainPoweredMessage}
         showWarning={warning && !newTradeRequiresAcceptance}
         transactionUSDValue={derivedSwapInfo.currencyAmountsUSDValue[CurrencyField.OUTPUT]}
@@ -135,25 +150,64 @@ export function SwapDetails({
         amountUserWillReceive={derivedSwapInfo.outputAmountUserWillReceive ?? undefined}
         includesDelegation={includesDelegation}
         onShowWarning={onShowWarning}
+        RoutingInfo={
+          hasAcceptedTrade && !acceptedTrade.indicative ? (
+            <RoutingInfo trade={acceptedTrade} gasFee={gasFee} chainId={acceptedTrade.inputAmount.currency.chainId} />
+          ) : (
+            <Flex row alignItems="center" justifyContent="space-between">
+              <Text color="$neutral2" variant="body3">
+                {t('swap.details.orderRouting')}
+              </Text>
+              <Text color="$neutral1" variant="body3">
+                Uniswap API
+              </Text>
+            </Flex>
+          )
+        }
       >
-        <Flex row alignItems="center" justifyContent="space-between">
-          <Text color="$neutral2" variant="body3">
-            {t('swap.details.rate')}
-          </Text>
-          <SwapRateRatio trade={trade} derivedSwapInfo={acceptedDerivedSwapInfo} justifyContent="flex-end" />
-        </Flex>
-        <EstimatedSwapTime showIfLongerThanCutoff={false} timeMs={estimatedSwapTime} />
-        {isBridgeTrade === false && (
+        {hasTrade && (
+          <Flex row alignItems="center" justifyContent="space-between">
+            <Text color="$neutral2" variant="body3">
+              {t('swap.details.rate')}
+            </Text>
+            <SwapRateRatio trade={trade} derivedSwapInfo={acceptedDerivedSwapInfo} justifyContent="flex-end" />
+          </Flex>
+        )}
+        {hasTrade && <EstimatedSwapTime showIfLongerThanCutoff={false} timeMs={estimatedSwapTime} />}
+        {/* 价格影响 - 即使没有 trade 也显示（基于价格计算） */}
+        <PriceImpactRow derivedSwapInfo={acceptedDerivedSwapInfo} hide={false} />
+        {/* 滑点上限 */}
+        {hasAcceptedTrade && isBridgeTrade === false ? (
           <MaxSlippageRow
             acceptedDerivedSwapInfo={acceptedDerivedSwapInfo}
             autoSlippageTolerance={autoSlippageTolerance}
             customSlippageTolerance={customSlippageTolerance}
           />
+        ) : (
+          <Flex row alignItems="center" gap="$spacing12" justifyContent="space-between">
+            <Flex row shrink alignItems="center" gap="$spacing4">
+              <Text color="$neutral2" numberOfLines={3} variant="body3">
+                {t('swap.details.slippage')}
+              </Text>
+            </Flex>
+            <Flex centered row gap="$spacing8">
+              {!customSlippageTolerance && (
+                <Flex centered backgroundColor="$surface3" borderRadius="$roundedFull" px="$spacing4" py="$spacing2">
+                  <Text color="$neutral2" variant="buttonLabel3">
+                    {t('swap.settings.slippage.control.auto')}
+                  </Text>
+                </Flex>
+              )}
+              <Text color="$neutral1" variant="body3">
+                {autoSlippageTolerance
+                  ? `${(autoSlippageTolerance * 100).toFixed(1)}%`
+                  : customSlippageTolerance
+                    ? `${(customSlippageTolerance * 100).toFixed(1)}%`
+                    : '2.5%'}
+              </Text>
+            </Flex>
+          </Flex>
         )}
-        {!acceptedTrade.indicative && (
-          <RoutingInfo trade={acceptedTrade} gasFee={gasFee} chainId={acceptedTrade.inputAmount.currency.chainId} />
-        )}
-        {!priceUxEnabled && <PriceImpactRow derivedSwapInfo={acceptedDerivedSwapInfo} />}
       </TransactionDetails>
     </HeightAnimator>
   )

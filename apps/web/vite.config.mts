@@ -1,4 +1,3 @@
-import { cloudflare } from '@cloudflare/vite-plugin'
 import react from '@vitejs/plugin-react'
 import reactOxc from '@vitejs/plugin-react-oxc'
 import { execSync } from 'child_process'
@@ -28,6 +27,7 @@ const DEPLOY_TARGET = process.env.DEPLOY_TARGET || 'cloudflare'
 const VITE_DISABLE_SOURCEMAP = process.env.VITE_DISABLE_SOURCEMAP === 'true'
 const DEBUG_PROXY = process.env.VITE_DEBUG_PROXY === 'true'
 const ENABLE_PROXY = process.env.VITE_ENABLE_ENTRY_GATEWAY_PROXY === 'true'
+const DISABLE_CLOUDFLARE_PLUGIN = process.env.DISABLE_CLOUDFLARE_PLUGIN === 'true'
 
 const DEFAULT_PORT = 3000
 
@@ -285,18 +285,20 @@ export default defineConfig(({ mode }) => {
           }
         },
       },
-      DEPLOY_TARGET === 'cloudflare' || mode === 'development'
-        ? cloudflare({
-            configPath: './wrangler-vite-worker.jsonc',
-            // Workaround for cloudflare plugin bug: explicitly set environment name based on CLOUDFLARE_ENV
-            viteEnvironment:
-              process.env.CLOUDFLARE_ENV === 'production'
-                ? { name: 'app' }
-                : process.env.CLOUDFLARE_ENV === 'staging'
-                  ? { name: 'app_staging' }
-                  : undefined,
-          })
-        : undefined,
+      // Skip Cloudflare plugin in development mode to avoid miniflare connection issues
+      // The plugin is only needed for Cloudflare Workers deployment, not for local development
+      undefined, // Disabled in development - uncomment below for production builds
+      // mode !== 'development' && !DISABLE_CLOUDFLARE_PLUGIN && DEPLOY_TARGET === 'cloudflare'
+      //   ? (await import('@cloudflare/vite-plugin')).cloudflare({
+      //       configPath: './wrangler-vite-worker.jsonc',
+      //       viteEnvironment:
+      //         process.env.CLOUDFLARE_ENV === 'production'
+      //           ? { name: 'app' }
+      //           : process.env.CLOUDFLARE_ENV === 'staging'
+      //             ? { name: 'app_staging' }
+      //             : undefined,
+      //     })
+      //   : undefined,
     ].filter(Boolean as unknown as <T>(x: T) => x is NonNullable<T>),
 
     optimizeDeps: {

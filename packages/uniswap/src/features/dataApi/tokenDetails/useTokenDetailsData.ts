@@ -21,14 +21,21 @@ import type { CurrencyId } from 'uniswap/src/types/currency'
  * token page shows the correct price for that specific chain.
  *
  * Prefers per-chain subgraph data, falls back to aggregated CoinGecko data
+ * 
+ * 注意：GraphQL API 已被禁用，此函数现在始终返回 undefined。
+ * 如需获取代币价格，请实现自己的链上价格获取逻辑。
  */
 export function useTokenSpotPrice(currencyId: CurrencyId): number | undefined {
-  const tokenMarket = useTokenMarketPartsFragment({ currencyId }).data.market
-  const projectMarkets = useTokenProjectMarketsPartsFragment({ currencyId }).data.project?.markets
+  // GraphQL API 已禁用，不再调用 useTokenMarketPartsFragment 和 useTokenProjectMarketsPartsFragment
+  // const tokenMarket = useTokenMarketPartsFragment({ currencyId }).data.market
+  // const projectMarkets = useTokenProjectMarketsPartsFragment({ currencyId }).data.project?.markets
 
-  return useMemo(() => {
-    return tokenMarket?.price?.value ?? projectMarkets?.[0]?.price?.value
-  }, [tokenMarket?.price?.value, projectMarkets?.[0]?.price?.value])
+  // return useMemo(() => {
+  //   return tokenMarket?.price?.value ?? projectMarkets?.[0]?.price?.value
+  // }, [tokenMarket?.price?.value, projectMarkets?.[0]?.price?.value])
+  
+  // 返回 undefined，表示价格不可用
+  return undefined
 }
 
 /**

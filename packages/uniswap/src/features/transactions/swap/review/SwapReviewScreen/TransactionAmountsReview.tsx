@@ -47,8 +47,18 @@ export function TransactionAmountsReview({
   const priceUXEnabled = usePriceUXEnabled()
   const { inputCurrencyAmount, outputCurrencyAmount } = getTradeAmounts(acceptedDerivedSwapInfo, priceUXEnabled)
 
+  // 调试日志：仅在需要时启用
+  // console.debug('[TransactionAmountsReview] 金额检查:', {
+  //   hasInputAmount: !!inputCurrencyAmount,
+  //   hasOutputAmount: !!outputCurrencyAmount,
+  //   inputAmount: inputCurrencyAmount?.toExact(),
+  //   outputAmount: outputCurrencyAmount?.toExact(),
+  //   hasTrade: !!displayTrade,
+  // })
+
   // This should never happen. It's just to keep TS happy.
   if (!inputCurrencyAmount || !outputCurrencyAmount) {
+    console.error('[TransactionAmountsReview] 缺少必需的 currencyAmount')
     throw new Error('Missing required `currencyAmount` to render `TransactionAmountsReview`')
   }
 
@@ -72,14 +82,32 @@ export function TransactionAmountsReview({
   // USD amount
   const usdAmountIn = useUSDCValue(inputCurrencyAmount)
   const usdAmountOut = useUSDCValue(outputCurrencyAmount)
-  const formattedFiatAmountIn = useMemo(
-    () => convertFiatAmountFormatted(usdAmountIn?.toExact(), NumberType.FiatTokenQuantity),
-    [convertFiatAmountFormatted, usdAmountIn],
-  )
-  const formattedFiatAmountOut = useMemo(
-    () => convertFiatAmountFormatted(usdAmountOut?.toExact(), NumberType.FiatTokenQuantity),
-    [convertFiatAmountFormatted, usdAmountOut],
-  )
+  
+  // 如果没有从 useUSDCValue 获取到价值，尝试从 currencyAmountsUSDValue 获取
+  const inputUSDValue = acceptedDerivedSwapInfo.currencyAmountsUSDValue[CurrencyField.INPUT]
+  const outputUSDValue = acceptedDerivedSwapInfo.currencyAmountsUSDValue[CurrencyField.OUTPUT]
+  
+  const formattedFiatAmountIn = useMemo(() => {
+    if (usdAmountIn) {
+      return convertFiatAmountFormatted(usdAmountIn.toExact(), NumberType.FiatTokenQuantity)
+    }
+    // 如果没有从 useUSDCValue 获取到，使用 currencyAmountsUSDValue
+    if (inputUSDValue) {
+      return convertFiatAmountFormatted(inputUSDValue.toExact(), NumberType.FiatTokenQuantity)
+    }
+    return undefined
+  }, [convertFiatAmountFormatted, usdAmountIn, inputUSDValue])
+  
+  const formattedFiatAmountOut = useMemo(() => {
+    if (usdAmountOut) {
+      return convertFiatAmountFormatted(usdAmountOut.toExact(), NumberType.FiatTokenQuantity)
+    }
+    // 如果没有从 useUSDCValue 获取到，使用 currencyAmountsUSDValue
+    if (outputUSDValue) {
+      return convertFiatAmountFormatted(outputUSDValue.toExact(), NumberType.FiatTokenQuantity)
+    }
+    return undefined
+  }, [convertFiatAmountFormatted, usdAmountOut, outputUSDValue])
 
   const shouldDimInput = newTradeRequiresAcceptance && exactCurrencyField === CurrencyField.OUTPUT
   const shouldDimOutput = newTradeRequiresAcceptance && exactCurrencyField === CurrencyField.INPUT
@@ -209,9 +237,11 @@ function CurrencyValueWithIcon({
           {formattedTokenAmount} {symbolDisplayText}
         </Text>
 
-        <Text color={fiatColor} variant="body2">
-          {formattedFiatAmount}
-        </Text>
+        {formattedFiatAmount && (
+          <Text color={fiatColor} variant="body2">
+            {formattedFiatAmount}
+          </Text>
+        )}
       </Flex>
 
       <CurrencyLogo currencyInfo={currencyInfo} size={iconSizes.icon40} />

@@ -15,6 +15,7 @@ import { useDebouncedTrade } from 'uniswap/src/features/transactions/swap/form/S
 import type { GasInfo } from 'uniswap/src/features/transactions/swap/form/SwapFormScreen/SwapFormScreenDetails/SwapFormScreenFooter/GasAndWarningRows/types'
 import { usePriceUXEnabled } from 'uniswap/src/features/transactions/swap/hooks/usePriceUXEnabled'
 import { useSwapFormStoreDerivedSwapInfo } from 'uniswap/src/features/transactions/swap/stores/swapFormStore/useSwapFormStore'
+import { CurrencyField } from 'uniswap/src/types/currency'
 import { isMobileApp, isWebApp } from 'utilities/src/platform'
 
 // TradeInfoRow take `gasInfo` as a prop (rather than directly using useDebouncedGasInfo) because on mobile,
@@ -43,10 +44,14 @@ export function TradeInfoRow({ gasInfo, warning }: { gasInfo: GasInfo; warning?:
   const outputChainId = currencies.output?.currency.chainId
   const showCanonicalBridge = isWebApp && warning?.type === WarningLabel.NoQuotesFound && inputChainId !== outputChainId
 
+  // 检查是否有输出金额（可能来自 trade 或 USD 价值计算）
+  const hasOutputAmount = !!derivedSwapInfo.currencyAmounts[CurrencyField.OUTPUT]?.greaterThan(0)
+  const shouldShowRate = (debouncedTrade || hasOutputAmount) && !warning
+
   return (
     <Flex centered row>
       <Flex fill>
-        {debouncedTrade && !warning && (
+        {shouldShowRate && (
           <SwapRateRatio
             initialInverse={true}
             styling="secondary"
@@ -69,7 +74,7 @@ export function TradeInfoRow({ gasInfo, warning }: { gasInfo: GasInfo; warning?:
 
       {showCanonicalBridge ? (
         <CanonicalBridgeLinkBanner chainId={outputChainId ?? UniverseChainId.Mainnet} />
-      ) : debouncedTrade ? (
+      ) : (debouncedTrade || hasOutputAmount) ? (
         <Accordion.Trigger
           p="$none"
           style={{ background: '$surface1' }}

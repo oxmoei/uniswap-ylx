@@ -45,6 +45,7 @@ export interface TokenBalanceMainParts {
   denominatedValue?: {
     value?: number
   }
+  pricePerUnit?: number // 每单位代币的 USD 价格（新增）
   tokenProjectMarket?: {
     relativeChange24?: {
       value?: number
@@ -94,6 +95,8 @@ export const getPortfolioQuery = <TSelectData = GetPortfolioResponse>({
 
   return queryOptions({
     queryKey: [ReactQueryCacheKey.GetPortfolio, accountAddressesByPlatform, inputWithoutModifierAndWalletAccount],
+    staleTime: 30 * 1000, // 30秒内数据视为新鲜，避免不必要的重新获取
+    gcTime: 5 * 60 * 1000, // 5分钟内保持缓存，提供即时响应
     queryFn: async () => {
       const log = createLogger('getPortfolio.ts', 'queryFn', '[REST-ITBU]')
 
@@ -238,14 +241,28 @@ export function useRestTokenBalanceMainParts({
   const selectMainParts = useEvent((data: GetPortfolioResponse | undefined) => {
     const balance = _findBalanceFromCurrencyId(data, currencyId)
 
-    return balance
-      ? {
-          denominatedValue: { value: balance.valueUsd },
-          tokenProjectMarket: {
-            relativeChange24: { value: balance.pricePercentChange1d },
-          },
-        }
-      : undefined
+    if (!balance) {
+      return undefined
+    }
+
+    // 优先使用 priceUsd（如果可用），否则通过 valueUsd / amount 计算
+    let pricePerUnit: number | undefined
+
+    if (balance.priceUsd !== undefined && balance.priceUsd > 0) {
+      // 直接使用 priceUsd（不依赖余额）
+      pricePerUnit = balance.priceUsd
+    } else if (balance.valueUsd !== undefined && balance.amount?.amount !== undefined && balance.amount.amount > 0) {
+      // 通过 valueUsd / amount 计算价格
+      pricePerUnit = balance.valueUsd / balance.amount.amount
+    }
+
+    return {
+      denominatedValue: { value: pricePerUnit ? pricePerUnit * (balance.amount?.amount || 1) : balance.valueUsd },
+      pricePerUnit, // 添加每单位价格
+      tokenProjectMarket: {
+        relativeChange24: { value: balance.pricePercentChange1d },
+      },
+    }
   })
 
   return useQuery({

@@ -12,6 +12,7 @@ import { useSwapReviewTransactionStore } from 'uniswap/src/features/transactions
 import { useSwapReviewWarningStore } from 'uniswap/src/features/transactions/swap/review/stores/swapReviewWarningStore/useSwapReviewWarningStore'
 import { useSwapFormStore } from 'uniswap/src/features/transactions/swap/stores/swapFormStore/useSwapFormStore'
 import { isValidSwapTxContext } from 'uniswap/src/features/transactions/swap/types/swapTxAndGasInfo'
+import { CurrencyField } from 'uniswap/src/types/currency'
 import { isChained } from 'uniswap/src/features/transactions/swap/utils/routing'
 import { UnichainPoweredMessage } from 'uniswap/src/features/transactions/TransactionDetails/UnichainPoweredMessage'
 import { getShouldDisplayTokenWarningCard } from 'uniswap/src/features/transactions/TransactionDetails/utils/getShouldDisplayTokenWarningCard'
@@ -88,12 +89,21 @@ function useSwapSubmitButton(): {
     feeOnTransferProps,
   })
 
+  const { derivedSwapInfo } = useSwapReviewTransactionStore((s) => ({
+    derivedSwapInfo: s.derivedSwapInfo,
+  }))
+
   const submitButtonDisabled = useMemo(() => {
     const validSwap = isValidSwapTxContext(swapTxContext)
     const isTokenWarningBlocking = shouldDisplayTokenWarningCard && !tokenWarningChecked
 
+    // 如果没有 trade，检查是否有输入和输出金额（基于 USD 价值计算）
+    const hasInputAmount = !!derivedSwapInfo.currencyAmounts[CurrencyField.INPUT]?.greaterThan(0)
+    const hasOutputAmount = !!derivedSwapInfo.currencyAmounts[CurrencyField.OUTPUT]?.greaterThan(0)
+    const hasValidAmounts = hasInputAmount && hasOutputAmount
+
     return (
-      (!validSwap && !isWrap) ||
+      (!validSwap && !isWrap && !hasValidAmounts) ||
       !!blockingWarning ||
       newTradeRequiresAcceptance ||
       isSubmitting ||
@@ -107,6 +117,7 @@ function useSwapSubmitButton(): {
     isSubmitting,
     tokenWarningChecked,
     shouldDisplayTokenWarningCard,
+    derivedSwapInfo.currencyAmounts,
   ])
 
   return {

@@ -120,12 +120,25 @@ function SwapReviewContent(): JSX.Element | null {
 
   usePrepareSwapTransactionEffect()
 
+  // 调试日志：仅在需要时启用
+  // console.debug('[SwapReviewContent] 渲染状态:', {
+  //   isLoading,
+  //   isSwapMissingParams,
+  //   hasError: !!error.submissionError,
+  //   acceptedDerivedSwapInfo: !!acceptedDerivedSwapInfo,
+  //   isWrap,
+  //   newTradeRequiresAcceptance,
+  // })
+
   if (isLoading) {
+    // 调试日志：仅在需要时启用
+    // console.debug('[SwapReviewContent] 显示加载视图')
     return <SwapReviewLoadingView />
   }
 
   if (isSwapMissingParams) {
     // This should never happen, but sometimes it does because tamagui renders the mobile web drawer when isModalOpen is false.
+    console.error('[SwapReviewContent] 缺少必需参数')
     logger.error('Missing required props in `derivedSwapInfo` to render `SwapReview` screen.', {
       tags: {
         file: 'SwapReviewScreen',

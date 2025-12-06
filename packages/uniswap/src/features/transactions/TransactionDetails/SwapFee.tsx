@@ -36,6 +36,7 @@ export function SwapFee({
   const formattedAmountFiat =
     swapFeeUsd && !isNaN(swapFeeUsd) ? convertFiatAmountFormatted(swapFeeUsd, NumberType.FiatGasPrice) : undefined
 
+  // 如果没有 swapFee 但有 swapFeeUsd，使用默认的 0.25% 费用
   const swapFeeInfo = swapFee
     ? {
         noFeeCharged: swapFee.percent.equalTo(0),
@@ -45,10 +46,17 @@ export function SwapFee({
           getSymbolDisplayText(currency.symbol),
         formattedAmountFiat,
       }
-    : undefined
+    : swapFeeUsd !== undefined
+      ? {
+          noFeeCharged: false,
+          formattedPercent: '0.25%',
+          formattedAmount: undefined,
+          formattedAmountFiat,
+        }
+      : undefined
 
   // If we're loading and the last valid swapFee was null, don't show the fee line
-  if (loading && !lastValidSwapFee.current) {
+  if (loading && !lastValidSwapFee.current && swapFeeUsd === undefined) {
     return null
   }
 

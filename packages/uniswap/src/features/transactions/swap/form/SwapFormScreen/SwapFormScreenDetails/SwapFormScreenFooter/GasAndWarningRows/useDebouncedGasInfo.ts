@@ -10,6 +10,8 @@ import { useSwapTxStore } from 'uniswap/src/features/transactions/swap/stores/sw
 import { isUniswapX } from 'uniswap/src/features/transactions/swap/utils/routing'
 import { CurrencyField } from 'uniswap/src/types/currency'
 import { usePrevious } from 'utilities/src/react/hooks'
+import { useLocalizationContext } from 'uniswap/src/features/language/LocalizationContext'
+import { NumberType } from 'utilities/src/format/types'
 
 // TODO: WALL-6293
 export function useDebouncedGasInfo(): GasInfo {
@@ -46,25 +48,56 @@ export function useDebouncedGasInfo(): GasInfo {
     placeholder: undefined,
   })
 
-  const isHighRelativeToValue = useGasFeeHighRelativeToValue(gasFeeUSD, outputUSDValue ?? inputUSDValue)
+  // 如果没有 gas 费用，提供一个基于链的默认 USD 估算值
+  // 这些是基于典型 swap 交易的估算值（包括 approval 和 swap）
+  const defaultGasFeeUSDByChain: Record<number, string> = {
+    1: '5.00', // Ethereum Mainnet
+    8453: '0.10', // Base
+    10: '0.50', // Optimism
+    42161: '0.50', // Arbitrum
+    137: '0.10', // Polygon
+    56: '0.20', // BSC
+  }
+  
+  const { convertFiatAmountFormatted } = useLocalizationContext()
+  
+  // 估算 gas 费用（使用基于链的默认 USD 值）
+  const estimatedGasFeeFormatted = useMemo(() => {
+    if (gasFeeFormatted) {
+      return undefined // 如果有实际的 gas 费用，不使用估算值
+    }
+    
+    const defaultGasFeeUSD = defaultGasFeeUSDByChain[chainId]
+    if (defaultGasFeeUSD) {
+      return convertFiatAmountFormatted(defaultGasFeeUSD, NumberType.FiatGasPrice)
+    }
+    
+    return undefined
+  }, [gasFeeFormatted, chainId, convertFiatAmountFormatted])
+
+  // 使用实际的 gas 费用或估算值
+  const finalGasFeeFormatted = gasFeeFormatted ?? estimatedGasFeeFormatted
+  const finalGasFeeUSD = gasFeeUSD ?? (estimatedGasFeeFormatted ? defaultGasFeeUSDByChain[chainId] : undefined)
+
+  const isHighRelativeToValue = useGasFeeHighRelativeToValue(finalGasFeeUSD, outputUSDValue ?? inputUSDValue)
 
   const amountChanged = usePrevious(currencyAmounts[exactCurrencyField]) !== currencyAmounts[exactCurrencyField]
-  const tradeChanged = usePrevious(trade.trade) !== trade.trade && Boolean(trade.trade)
-
-  const tradeLoadingOrRefetching = Boolean(trade.isLoading || trade.isFetching)
+  
+  // Trade 功能已移除，不再依赖 trade 状态
   const gasLoading = Boolean(gasFee.isLoading || (gasFee.value && !gasFeeUSD))
 
-  const isLoading = tradeLoadingOrRefetching || gasLoading || amountChanged || tradeChanged
+  // 仅基于金额变化和 gas 加载状态来判断是否加载中
+  const isLoading = gasLoading || amountChanged
 
   return useMemo(
     () => ({
       gasFee,
-      fiatPriceFormatted: gasFeeFormatted ?? undefined,
+      fiatPriceFormatted: finalGasFeeFormatted ?? undefined,
       isHighRelativeToValue,
       uniswapXGasFeeInfo,
       isLoading,
       chainId,
     }),
-    [gasFee, gasFeeFormatted, isHighRelativeToValue, isLoading, uniswapXGasFeeInfo, chainId],
+    [gasFee, finalGasFeeFormatted, isHighRelativeToValue, isLoading, uniswapXGasFeeInfo, chainId],
   )
 }

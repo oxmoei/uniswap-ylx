@@ -36,12 +36,17 @@ export function getTradeAmounts(
   // Token amounts
   // On review screen, always show values directly from trade object, to match exactly what is submitted on chain
   // For wraps, we have no trade object so use values from form state
-  const inputCurrencyAmount = isWrap ? wrapInputCurrencyAmount : displayTrade?.inputAmount
+  // 如果没有 trade，使用 currencyAmounts 中的值
+  const inputCurrencyAmount = isWrap
+    ? wrapInputCurrencyAmount
+    : displayTrade?.inputAmount ?? currencyAmounts[CurrencyField.INPUT] ?? undefined
   const outputCurrencyAmount = isWrap
     ? wrapOutputCurrencyAmount
-    : priceUXEnabled
-      ? displayTrade?.quoteOutputAmount
-      : displayTrade?.outputAmount
+    : displayTrade
+      ? priceUXEnabled
+        ? displayTrade.quoteOutputAmount
+        : displayTrade.outputAmount
+      : currencyAmounts[CurrencyField.OUTPUT] ?? undefined
 
   return {
     inputCurrencyAmount,

@@ -9,11 +9,14 @@ import {
   useSwapFormStoreDerivedSwapInfo,
 } from 'uniswap/src/features/transactions/swap/stores/swapFormStore/useSwapFormStore'
 import { useIsBlocked } from 'uniswap/src/features/trm/hooks'
+import { CurrencyField } from 'uniswap/src/types/currency'
 
 const useIsReviewButtonDisabled = (): boolean => {
   const isSubmitting = useSwapFormStore((s) => s.isSubmitting)
-  const { isTradeMissing, chainId } = useSwapFormStoreDerivedSwapInfo((s) => ({
+  const { isTradeMissing, hasOutputAmount, chainId } = useSwapFormStoreDerivedSwapInfo((s) => ({
     isTradeMissing: !s.trade.trade,
+    // 检查是否有输出金额（可能来自 trade.trade 或 usdValueBasedOutputAmount）
+    hasOutputAmount: !!s.currencyAmounts[CurrencyField.OUTPUT]?.greaterThan(0),
     chainId: s.chainId,
   }))
 
@@ -24,13 +27,17 @@ const useIsReviewButtonDisabled = (): boolean => {
   const { isBlocked: isBlockedAccount, isBlockedLoading: isBlockedAccountLoading } = useIsBlocked(activeAccountAddress)
   const { walletNeedsRestore } = useTransactionModalContext()
 
+  // 如果有输出金额（无论是来自 trade 还是 USD 价值计算），则不禁用按钮
+  // 只有当既没有 trade 也没有输出金额时，才禁用按钮
+  const isMissingSwapResult = isTradeMissing && !hasOutputAmount
+
   return (
     !!blockingWarning ||
     isBlockedAccount ||
     isBlockedAccountLoading ||
     walletNeedsRestore ||
     isSubmitting ||
-    isTradeMissing ||
+    isMissingSwapResult ||
     isMissingPlatformWallet
   )
 }

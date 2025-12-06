@@ -11,6 +11,10 @@ linker = "hoisted"
 # Save exact versions (equivalent to defaultSemverRangePrefix: '')
 save = "exact"
 
+# Registry configuration (using npm registry)
+# If you encounter network issues, you can try:
+# registry = "https://registry.npmmirror.com"
+
 # Dev settings
 [dev]
 # Port for dev server

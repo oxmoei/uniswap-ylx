@@ -1,64 +1,77 @@
-# Uniswap Labs: Front End Interfaces
+# Uniswap Labs: 前端界面
 
-This is the **public** repository for Uniswap Labs’ front-end interfaces, including the Web App, Wallet Mobile App, and Wallet Extension. Uniswap is a protocol for decentralized exchange of Ethereum-based assets.
+这是 Uniswap Labs 前端界面的**公开**代码库，包括 Web 应用、钱包移动应用和钱包扩展程序。Uniswap 是一个用于去中心化交换基于以太坊资产的协议。
 
-## Interfaces
+## 界面
 
 - Web: [app.uniswap.org](https://app.uniswap.org)
-- Wallet (mobile + extension): [wallet.uniswap.org](https://wallet.uniswap.org)
+- Wallet（移动端 + 扩展程序）: [wallet.uniswap.org](https://wallet.uniswap.org)
 
-## Install & Apps
+## 安装与应用
+
+### Web 应用（桌面端）
 
 ```bash
 git clone git@github.com:Uniswap/interface.git
+cd uniswap
 bun install
-bun lfg
 bun web start
 ```
 
-For instructions per application or package, see the README published for each application:
+### 移动应用（iOS）
+
+```bash
+git clone git@github.com:Uniswap/interface.git
+cd uniswap
+bun install
+bun lfg
+```
+
+有关每个应用程序或包的详细说明，请查看每个应用程序发布的 README：
 
 - [Web](apps/web/README.md)
 - [Mobile](apps/mobile/README.md)
 - [Extension](apps/extension/README.md)
 
-## Contributing
+## 贡献
 
-For instructions on the best way to contribute, please review our [Contributing guide](CONTRIBUTING.md)!
+有关最佳贡献方式的说明，请查看我们的[贡献指南](CONTRIBUTING.md)！
 
-## Socials / Contact
+## 社交媒体 / 联系方式
 
-- X (Formerly Twitter): [@Uniswap](https://x.com/Uniswap)
+- X（原 Twitter）: [@Uniswap](https://x.com/Uniswap)
 - Reddit: [/r/Uniswap](https://www.reddit.com/r/Uniswap/)
-- Email: [contact@uniswap.org](mailto:contact@uniswap.org)
+- 邮箱: [contact@uniswap.org](mailto:contact@uniswap.org)
 - Discord: [Uniswap](https://discord.com/invite/uniswap)
 - LinkedIn: [Uniswap Labs](https://www.linkedin.com/company/uniswaporg)
 
-## Uniswap Links
+## Uniswap 链接
 
-- Website: [uniswap.org](https://uniswap.org/)
-- Docs: [uniswap.org/docs/](https://docs.uniswap.org/)
+- 网站: [uniswap.org](https://uniswap.org/)
+- 文档: [uniswap.org/docs/](https://docs.uniswap.org/)
 
-## Whitepapers
+## 白皮书
 
 - [V4](https://uniswap.org/whitepaper-v4.pdf)
 - [V3](https://uniswap.org/whitepaper-v3.pdf)
 - [V2](https://uniswap.org/whitepaper.pdf)
 - [V1](https://hackmd.io/C-DvwDSfSxuh-Gd4WKE_ig)
 
-## Production & Release Process
+## 生产与发布流程
 
-Uniswap Labs develops all front-end interfaces in a private repository.
-At the end of each development cycle:
+Uniswap Labs 在私有代码库中开发所有前端界面。
+在每个开发周期结束时：
 
-1. We publish the latest production-ready code to this public repository.
+1. 我们将最新的生产就绪代码发布到此公开代码库。
 
-2. Releases are automatically tagged — view them in the [Releases tab](https://github.com/Uniswap/interface/releases).
+2. 发布版本会自动标记 — 在[发布标签页](https://github.com/Uniswap/interface/releases)中查看。
 
-## 🗂 Directory Structure
+**注意**：本地项目目录建议命名为 `uniswap`。
 
-| Folder      | Contents                                                                       |
+## 🗂 目录结构
+
+| 文件夹      | 内容                                                                       |
 | ----------- | ------------------------------------------------------------------------------ |
-| `apps/`     | The home for each standalone application.                                      |
-| `config/`   | Shared infrastructure packages and configurations.                             |
-| `packages/` | Shared code packages covering UI, shared functionality, and shared utilities.  |
+| `apps/`     | 每个独立应用程序的目录。                                      |
+| `config/`   | 共享基础设施包和配置。                             |
+| `packages/` | 共享代码包，涵盖 UI、共享功能和共享工具。  |

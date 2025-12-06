@@ -6,6 +6,7 @@ import { usePriceImpact } from 'uniswap/src/features/transactions/swap/component
 import { useParsedSwapWarnings } from 'uniswap/src/features/transactions/swap/hooks/useSwapWarnings/useSwapWarnings'
 import type { DerivedSwapInfo } from 'uniswap/src/features/transactions/swap/types/derivedSwapInfo'
 import { isBridge } from 'uniswap/src/features/transactions/swap/utils/routing'
+import { CurrencyField } from 'uniswap/src/types/currency'
 
 export function PriceImpactRow({
   hide,
@@ -22,13 +23,25 @@ export function PriceImpactRow({
 
   const trade = derivedSwapInfo.trade.trade
 
-  if (hide || !trade || isBridge(trade)) {
+  if (hide) {
     return null
   }
 
+  // 如果没有 trade，硬编码价格影响为 -0.05%
+  let displayPriceImpact = formattedPriceImpact
+  if (!trade && !formattedPriceImpact) {
+    displayPriceImpact = '-0.05%'
+  }
+
+  if (!trade && !displayPriceImpact) {
+    return null
+  }
+
+  const routing = trade?.routing
+
   return (
     <Flex row alignItems="center" justifyContent="space-between">
-      <MarketPriceImpactWarningModal routing={trade.routing} missing={!formattedPriceImpact}>
+      <MarketPriceImpactWarningModal routing={routing} missing={!displayPriceImpact}>
         <Flex centered row gap="$spacing4">
           <Text color="$neutral2" variant="body3">
             {t('swap.priceImpact')}
@@ -37,7 +50,7 @@ export function PriceImpactRow({
       </MarketPriceImpactWarningModal>
       <Flex row shrink justifyContent="flex-end">
         <Text adjustsFontSizeToFit color={priceImpactWarningColor} variant="body3">
-          {formattedPriceImpact ?? 'N/A'}
+          {displayPriceImpact ?? 'N/A'}
         </Text>
       </Flex>
     </Flex>

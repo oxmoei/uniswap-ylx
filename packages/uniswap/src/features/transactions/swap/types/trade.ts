@@ -587,6 +587,10 @@ export type ValidatedIndicativeQuoteResponse = TradingApi.QuoteResponse & {
 export function validateIndicativeQuoteResponse(
   response: TradingApi.QuoteResponse,
 ): ValidatedIndicativeQuoteResponse | undefined {
+  // Check if quote exists and is not null before using 'in' operator
+  if (!response.quote || response.quote === null) {
+    return undefined
+  }
   if ('input' in response.quote && 'output' in response.quote) {
     const input = response.quote.input
     const output = response.quote.output
