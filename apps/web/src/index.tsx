@@ -64,6 +64,13 @@ if (__DEV__ && !isTestEnv()) {
 
 initializePortfolioQueryOverrides({ store })
 
+// Initialize preset custom tokens
+if (typeof window !== 'undefined') {
+  import('uniswap/src/features/tokens/presetCustomTokens').then((module) => {
+    module.initializePresetCustomTokens()
+  })
+}
+
 const loadListsUpdater = () => import('state/lists/updater')
 // Dynamic imports for theme updaters to enable code splitting
 // Note: Other exports from ThemeToggle (useIsDarkMode, ThemeSelector) are statically imported elsewhere

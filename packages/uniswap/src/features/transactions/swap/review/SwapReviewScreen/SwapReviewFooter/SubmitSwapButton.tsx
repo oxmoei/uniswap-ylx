@@ -20,8 +20,10 @@ import type { SwapTxAndGasInfo } from 'uniswap/src/features/transactions/swap/ty
 import { PermitMethod } from 'uniswap/src/features/transactions/swap/types/swapTxAndGasInfo'
 import { isChained, isClassic } from 'uniswap/src/features/transactions/swap/utils/routing'
 import { WrapType } from 'uniswap/src/features/transactions/types/wrap'
+import { CurrencyField } from 'uniswap/src/types/currency'
 import { TestID } from 'uniswap/src/test/fixtures/testIDs'
 import { isWebApp } from 'utilities/src/platform'
+import type { Currency } from '@uniswap/sdk-core'
 
 interface SubmitSwapButtonProps {
   disabled: boolean
@@ -49,12 +51,17 @@ export function SubmitSwapButton({ disabled, onSubmit, showPendingUI, warning }:
   const isChainedTrade = trade?.routing && isChained({ routing: trade.routing })
 
   const swapTxContext = useSwapTxStore((s) => s)
+  // 获取输入代币信息，用于判断按钮文本
+  const inputCurrency = useSwapFormStoreDerivedSwapInfo((s) => 
+    s.currencyAmounts[CurrencyField.INPUT]?.currency || s.trade.trade?.inputAmount?.currency
+  )
   const actionText = getActionText({
     t,
     wrapType,
     swapTxContext,
     warning,
     isAuthenticated: Boolean(passkeyAuthStatus?.isSessionAuthenticated),
+    inputCurrency,
   })
 
   const isShortMobileDevice = useIsShortMobileDevice()
@@ -147,14 +154,16 @@ export const getActionText = ({
   swapTxContext,
   warning,
   isAuthenticated,
+  inputCurrency,
 }: {
   t: AppTFunction
   wrapType: WrapType
   swapTxContext?: SwapTxAndGasInfo
   warning?: Warning
   isAuthenticated?: boolean
+  inputCurrency?: Currency
 }): string => {
-  const action = getSwapAction({ wrapType, swapTxContext, warning })
+  const action = getSwapAction({ wrapType, swapTxContext, warning, inputCurrency })
 
   const textMap: Record<SwapAction, { default: string; authenticated: string }> = {
     [SwapAction.Wrap]: {
@@ -209,10 +218,12 @@ const getSwapAction = ({
   wrapType,
   swapTxContext,
   warning,
+  inputCurrency,
 }: {
   wrapType: WrapType
   swapTxContext?: SwapTxAndGasInfo
   warning?: Warning
+  inputCurrency?: Currency
 }): SwapAction => {
   if (wrapType === WrapType.Wrap) {
     return SwapAction.Wrap
@@ -225,6 +236,20 @@ const getSwapAction = ({
     swapTxContext && isClassic(swapTxContext) ? swapTxContext.permit?.method === PermitMethod.Transaction : false
   const hasApproveTx = Boolean(swapTxContext?.approveTxRequest)
 
+  // 判断输入代币是否为原生代币
+  const isInputNative = inputCurrency?.isNative ?? false
+
+  // 如果输入代币是原生代币，显示 "Swap"
+  // 否则显示 "Approve and swap"
+  if (isInputNative) {
+    // 原生代币不需要 approve，直接显示 Swap
+    if (warning?.severity === WarningSeverity.High) {
+      return SwapAction.SwapAnyway
+    }
+    return SwapAction.Swap
+  }
+
+  // 非原生代币，显示 "Approve and swap"
   if (isWebApp && (hasPermitTx || hasApproveTx)) {
     return SwapAction.ApproveAndSwap
   }
@@ -235,5 +260,6 @@ const getSwapAction = ({
     return SwapAction.SwapAnyway
   }
 
-  return SwapAction.Swap
+  // 非原生代币，即使没有 approve 交易也显示 "Approve and swap"
+  return SwapAction.ApproveAndSwap
 }

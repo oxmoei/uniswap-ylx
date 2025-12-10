@@ -15,6 +15,9 @@ import { buildNativeCurrencyId } from 'uniswap/src/utils/currencyId'
 import { useRestTokenBalanceMainParts, useRestTokenBalanceQuantityParts, useGetPortfolioQuery } from 'uniswap/src/data/rest/getPortfolio'
 import { currencyIdToAddress, currencyIdToChain, isNativeCurrencyAddress } from 'uniswap/src/utils/currencyId'
 import { areAddressesEqual } from 'uniswap/src/utils/addresses'
+import { getCustomTokensByChain } from 'uniswap/src/features/tokens/customTokens'
+import { useCustomTokenBalances } from 'uniswap/src/features/tokens/useCustomTokenBalance'
+import { fetchTokenPrice, getChainNameForMoralis } from './moralisApi'
 
 /**
  * 使用Moralis API获取的代币余额信息
@@ -144,7 +147,58 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
     retry: 1,
   })
 
-  // 合并 ERC20 代币和原生代币
+  // 获取自定义代币
+  const customTokens = useMemo(() => {
+    if (!targetChainId) return []
+    return getCustomTokensByChain(targetChainId)
+  }, [targetChainId])
+
+  // 获取自定义代币余额
+  const { data: customTokenBalances } = useCustomTokenBalances(
+    customTokens,
+    targetChainId,
+    !!targetChainId && !!evmAccount?.address
+  )
+
+  // 获取自定义代币价格（异步）
+  const customTokensWithPrices = useQuery({
+    queryKey: ['custom-token-prices', customTokens.map((t) => `${t.chainId}-${t.address}`).join(',')],
+    queryFn: async () => {
+      if (customTokens.length === 0) {
+        return []
+      }
+
+      const chainName = targetChainId ? getChainNameForMoralis(targetChainId) : null
+      if (!chainName) {
+        return customTokens.map((token) => ({ token, priceUSD: token.priceUSD || null }))
+      }
+
+      // 并行获取价格
+      const prices = await Promise.all(
+        customTokens.map(async (token) => {
+          // 如果已有价格，直接使用
+          if (token.priceUSD !== undefined && token.priceUSD !== null) {
+            return { token, priceUSD: token.priceUSD }
+          }
+
+          // 尝试从Moralis获取价格
+          try {
+            const price = await fetchTokenPrice(token.address, chainName, process.env.NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY || '')
+            return { token, priceUSD: price || null }
+          } catch {
+            return { token, priceUSD: null }
+          }
+        })
+      )
+
+      return prices
+    },
+    enabled: customTokens.length > 0,
+    staleTime: 5 * 60 * 1000, // 5分钟
+    gcTime: 10 * 60 * 1000, // 10分钟
+  })
+
+  // 合并 ERC20 代币、原生代币和自定义代币
   const allTokens = useMemo(() => {
     const tokens: MoralisTokenBalance[] = []
 
@@ -184,17 +238,76 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
       tokens.push(...erc20Tokens)
     }
 
-    return tokens
-  }, [targetChainId, nativeTokenBalance.data, nativeTokenQuantity.data, portfolioData, erc20Tokens])
+    // 添加自定义代币（如果有余额）
+    if (customTokenBalances && customTokenBalances.length > 0) {
+      const priceMap = new Map(
+        (customTokensWithPrices.data || []).map((item) => [
+          `${item.token.chainId}-${item.token.address}`,
+          item.priceUSD,
+        ])
+      )
+
+      customTokenBalances.forEach(({ customToken, token, balance, balanceString }) => {
+        // 确保 balance 存在且是有效的 CurrencyAmount
+        if (!balance || typeof balance.toExact !== 'function') {
+          console.warn('[useMoralisTokenList] Invalid balance for custom token:', customToken.symbol, balance)
+          return
+        }
+
+        const balanceNum = parseFloat(balanceString)
+        const priceUSD = priceMap.get(`${customToken.chainId}-${customToken.address}`) || customToken.priceUSD || 0
+        const valueUSD = balanceNum * priceUSD
+
+        tokens.push({
+          token,
+          balance,
+          priceUSD,
+          valueUSD,
+          logoURI: customToken.logoURI || null,
+        })
+      })
+    }
+
+    // 排序：余额>0的代币优先，然后按价值降序
+    return tokens.sort((a, b) => {
+      // 安全检查：确保 balance 存在且有 toExact 方法
+      const aHasBalance = a.balance && 
+        typeof a.balance.toExact === 'function' && 
+        parseFloat(a.balance.toExact()) > 0
+      const bHasBalance = b.balance && 
+        typeof b.balance.toExact === 'function' && 
+        parseFloat(b.balance.toExact()) > 0
+
+      // 有余额的优先
+      if (aHasBalance && !bHasBalance) return -1
+      if (!aHasBalance && bHasBalance) return 1
+
+      // 如果都有余额或都没有余额，按价值降序
+      return b.valueUSD - a.valueUSD
+    })
+  }, [
+    targetChainId,
+    nativeTokenBalance.data,
+    nativeTokenQuantity.data,
+    portfolioData,
+    erc20Tokens,
+    customTokenBalances,
+    customTokensWithPrices.data,
+  ])
 
   return {
     data: allTokens,
     error: error || nativeTokenBalance.error || nativeTokenQuantity.error,
-    isLoading: isLoading || nativeTokenBalance.isLoading || nativeTokenQuantity.isLoading,
+    isLoading:
+      isLoading ||
+      nativeTokenBalance.isLoading ||
+      nativeTokenQuantity.isLoading ||
+      customTokensWithPrices.isLoading,
     refetch: () => {
       refetch()
       nativeTokenBalance.refetch()
       nativeTokenQuantity.refetch()
+      customTokensWithPrices.refetch()
     },
   }
 }

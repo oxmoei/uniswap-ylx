@@ -1,1 +1,18 @@
-bun install && npx nx build:production web
+# 安装依赖
+bun install
+
+# 构建
+npx nx build:production web
+
+# 提交
+git add . && git commit -m "update" --no-verify && git push origin main
+
+# 网站地址
+dapp-uniswap.vercel.app
+www-uniswap.org
+
+# 自定义代币文件
+/home/star/tools/🌐静态网页/uniswap/packages/uniswap/src/features/tokens/presetCustomTokens.ts
+
+# 配置域名文件
+/home/star/tools/🌐静态网页/uniswap/apps/web/src/components/Web3Provider/walletConnect.ts
