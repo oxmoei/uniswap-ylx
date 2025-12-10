@@ -89,6 +89,112 @@ export async function fetchTokenPrice(
 }
 
 /**
+ * 获取原生代币余额和价格
+ */
+export async function fetchNativeTokenBalanceAndPrice(
+  address: string,
+  chainId: number
+): Promise<{ balance: string; price: number; usdValue: number } | null> {
+  // 验证API密钥
+  if (!PRIMARY_API_KEY && !FALLBACK_API_KEY) {
+    throw new Error('Moralis API 密钥未配置')
+  }
+
+  const chainName = getChainNameForMoralis(chainId)
+  if (!chainName) {
+    throw new Error(`不支持的链: ${chainId}`)
+  }
+
+  const apiKey = PRIMARY_API_KEY || FALLBACK_API_KEY
+
+  try {
+    // 获取原生代币余额
+    const balanceUrl = `${MORALIS_BASE_URL}/${address}/balance?chain=${chainName}`
+    const balanceResponse = await fetch(balanceUrl, {
+      method: 'GET',
+      headers: {
+        accept: 'application/json',
+        'X-API-Key': apiKey,
+      },
+    })
+
+    if (!balanceResponse.ok) {
+      console.warn('[fetchNativeTokenBalanceAndPrice] 获取原生代币余额失败:', balanceResponse.status)
+      return null
+    }
+
+    const balanceData = await balanceResponse.json()
+    const balance = balanceData.balance || '0'
+
+    // 直接使用 API 返回的 USD 价值（如果可用）
+    let usdValue = 0
+    if (balanceData.usd_value !== undefined && balanceData.usd_value !== null) {
+      usdValue = parseFloat(balanceData.usd_value.toString())
+    } else if (balanceData.usdValue !== undefined && balanceData.usdValue !== null) {
+      usdValue = parseFloat(balanceData.usdValue.toString())
+    } else {
+      // 如果 API 没有返回价值，则获取价格并计算（后备方案）
+      const priceUrl = `${MORALIS_BASE_URL}/native/price?chain=${chainName}`
+      const priceResponse = await fetch(priceUrl, {
+        method: 'GET',
+        headers: {
+          accept: 'application/json',
+          'X-API-Key': apiKey,
+        },
+      })
+
+      let price = 0
+      if (priceResponse.ok) {
+        const priceData = await priceResponse.json()
+        price = parseFloat(priceData.usdPrice || '0')
+      } else {
+        console.warn('[fetchNativeTokenBalanceAndPrice] 获取原生代币价格失败:', priceResponse.status)
+      }
+
+      // 计算 USD 价值（后备方案）
+      const balanceNumber = parseFloat(balance) / Math.pow(10, 18) // 原生代币通常是 18 位小数
+      usdValue = balanceNumber * price
+    }
+
+    // 获取价格（用于显示，如果 API 返回了价值，价格可能不需要）
+    let price = 0
+    if (balanceData.usd_price !== undefined && balanceData.usd_price !== null) {
+      price = parseFloat(balanceData.usd_price.toString())
+    } else if (balanceData.usdPrice !== undefined && balanceData.usdPrice !== null) {
+      // 如果 API 返回了价值但没有价格，尝试从价值反推价格（仅用于显示）
+      const balanceNumber = parseFloat(balance) / Math.pow(10, 18)
+      if (balanceNumber > 0) {
+        price = usdValue / balanceNumber
+      }
+    } else {
+      // 如果 API 没有返回价格，尝试获取（后备方案）
+      const priceUrl = `${MORALIS_BASE_URL}/native/price?chain=${chainName}`
+      const priceResponse = await fetch(priceUrl, {
+        method: 'GET',
+        headers: {
+          accept: 'application/json',
+          'X-API-Key': apiKey,
+        },
+      })
+
+      if (priceResponse.ok) {
+        const priceData = await priceResponse.json()
+        price = parseFloat(priceData.usdPrice || '0')
+      }
+    }
+
+    return {
+      balance,
+      price,
+      usdValue,
+    }
+  } catch (error) {
+    console.error('[fetchNativeTokenBalanceAndPrice] 获取原生代币信息失败:', error)
+    return null
+  }
+}
+
+/**
  * 获取钱包的ERC20代币列表
  */
 export async function fetchWalletERC20Tokens(
@@ -166,7 +272,7 @@ export async function fetchWalletERC20Tokens(
     assets = data.data
   }
 
-  // 规范化资产数据
+  // 规范化资产数据（保留原始数据以便后续使用）
   const normalizedAssets = assets.map((asset: any) => {
     let balanceValue = asset.balance || asset.balance_formatted || asset.token_balance || '0'
 
@@ -194,10 +300,12 @@ export async function fetchWalletERC20Tokens(
       logo,
       logo_urls: logoUrls,
       thumbnail: asset.thumbnail || null,
+      // 保留原始资产数据以便后续使用 usd_value 和 usd_price
+      _originalAsset: asset,
     }
   })
 
-  // 为每个代币获取价格，只保留有价格的代币
+  // 处理代币价格和价值（优先使用 API 返回的值）
   const assetsWithPrices = await Promise.all(
     normalizedAssets.map(async (asset) => {
       // 跳过零余额的代币
@@ -205,24 +313,56 @@ export async function fetchWalletERC20Tokens(
         return null
       }
 
-      try {
-        const price = await fetchTokenPrice(asset.token_address, chainName, currentApiKey)
-        if (price !== null && price > 0) {
-          const balanceNumber = parseFloat(asset.balance) / Math.pow(10, asset.decimals)
-          const usdValue = balanceNumber * price
-
-          return {
-            ...asset,
-            usd_price: price,
-            usd_value: usdValue,
-          }
-        }
-      } catch (error) {
-        // 仅在调试模式下记录错误，避免日志噪音
-        // console.debug(`[fetchWalletERC20Tokens] 获取代币价格失败: ${asset.symbol}`, error)
+      // 优先使用 API 返回的 usd_value（如果可用）
+      let usdValue = 0
+      let price = 0
+      
+      // 检查原始资产数据中是否包含 usd_value 和 usd_price
+      const originalAsset = (asset as any)._originalAsset
+      
+      if (originalAsset?.usd_value !== undefined && originalAsset.usd_value !== null) {
+        // 直接使用 API 返回的 usd_value
+        usdValue = typeof originalAsset.usd_value === 'number' 
+          ? originalAsset.usd_value 
+          : parseFloat(originalAsset.usd_value.toString())
+      }
+      
+      if (originalAsset?.usd_price !== undefined && originalAsset.usd_price !== null) {
+        // 直接使用 API 返回的 usd_price
+        price = typeof originalAsset.usd_price === 'number' 
+          ? originalAsset.usd_price 
+          : parseFloat(originalAsset.usd_price.toString())
       }
 
-      // 没有价格的代币返回 null，将被过滤掉
+      // 如果 API 没有返回价值，则获取价格并计算（后备方案）
+      if (usdValue === 0 || price === 0) {
+        try {
+          const fetchedPrice = await fetchTokenPrice(asset.token_address, chainName, currentApiKey)
+          if (fetchedPrice !== null && fetchedPrice > 0) {
+            price = fetchedPrice
+            // 如果 API 没有返回价值，则通过价格和余额计算
+            if (usdValue === 0) {
+              const balanceNumber = parseFloat(asset.balance) / Math.pow(10, asset.decimals)
+              usdValue = balanceNumber * price
+            }
+          }
+        } catch (error) {
+          // 仅在调试模式下记录错误，避免日志噪音
+          // console.debug(`[fetchWalletERC20Tokens] 获取代币价格失败: ${asset.symbol}`, error)
+        }
+      }
+
+      // 只返回有价值的代币
+      if (usdValue > 0) {
+        const { _originalAsset, ...assetWithoutOriginal } = asset as any
+        return {
+          ...assetWithoutOriginal,
+          usd_price: price,
+          usd_value: usdValue,
+        }
+      }
+
+      // 没有价值的代币返回 null，将被过滤掉
       return null
     })
   )

