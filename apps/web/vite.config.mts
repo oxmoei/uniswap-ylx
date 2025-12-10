@@ -360,10 +360,61 @@ export default defineConfig(({ mode }) => {
           entryFileNames: 'assets/[name]-[hash].js',
           chunkFileNames: 'assets/[name]-[hash].js',
           assetFileNames: 'assets/[name]-[hash].[ext]',
+          // Manual chunk splitting strategy to reduce bundle size
+          manualChunks: (id) => {
+            // Split vendor libraries into separate chunks
+            if (id.includes('node_modules')) {
+              // Large UI libraries
+              if (id.includes('@tamagui') || id.includes('tamagui')) {
+                return 'tamagui'
+              }
+              // React and core libraries
+              if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
+                return 'react-vendor'
+              }
+              // Web3 and blockchain libraries
+              if (
+                id.includes('@wagmi') ||
+                id.includes('wagmi') ||
+                id.includes('viem') ||
+                id.includes('ethers') ||
+                id.includes('@web3-react')
+              ) {
+                return 'web3-vendor'
+              }
+              // Uniswap SDKs
+              if (id.includes('@uniswap/')) {
+                return 'uniswap-sdk'
+              }
+              // GraphQL and data fetching
+              if (id.includes('@apollo') || id.includes('graphql') || id.includes('@tanstack/react-query')) {
+                return 'data-vendor'
+              }
+              // Chart and visualization libraries
+              if (id.includes('@visx') || id.includes('lightweight-charts') || id.includes('d3')) {
+                return 'charts-vendor'
+              }
+              // Animation libraries
+              if (id.includes('framer-motion') || id.includes('@rive-app')) {
+                return 'animation-vendor'
+              }
+              // Other large vendor libraries
+              if (
+                id.includes('styled-components') ||
+                id.includes('redux') ||
+                id.includes('i18next') ||
+                id.includes('@reduxjs/toolkit')
+              ) {
+                return 'utils-vendor'
+              }
+              // Default vendor chunk for other node_modules
+              return 'vendor'
+            }
+          },
         },
       },
-      // Increase the warning limit for larger chunks
-      chunkSizeWarningLimit: 800,
+      // Increase the warning limit for larger chunks (main bundle may still be large)
+      chunkSizeWarningLimit: 1000,
       commonjsOptions: {
         include: [/jsbi/, /node_modules/], // force inclusion + conversion of jsbi CJS
       },

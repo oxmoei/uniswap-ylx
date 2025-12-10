@@ -7,6 +7,8 @@ import { isEVMAddressWithChecksum } from 'utilities/src/addresses/evm/evm'
 import { isSVMAddress } from 'utilities/src/addresses/svm/svm'
 
 // In test environments, import Icons synchronously
+// In production, Icons are lazy-loaded to reduce initial bundle size
+// Note: Vite may warn about mixed static/dynamic imports, but this is intentional for test vs production
 const isTestEnv = process.env.NODE_ENV === 'test'
 const { Icons } = isTestEnv ? require('ui/src/components/Unicon/UniconSVGs') : { Icons: {} }
 

@@ -65,6 +65,9 @@ if (__DEV__ && !isTestEnv()) {
 initializePortfolioQueryOverrides({ store })
 
 const loadListsUpdater = () => import('state/lists/updater')
+// Dynamic imports for theme updaters to enable code splitting
+// Note: Other exports from ThemeToggle (useIsDarkMode, ThemeSelector) are statically imported elsewhere
+// This is intentional - only updaters need to be lazy-loaded
 const loadSystemThemeUpdater = () =>
   import('theme/components/ThemeToggle').then((m) => ({ default: m.SystemThemeUpdater }))
 const loadThemeColorMetaUpdater = () =>
