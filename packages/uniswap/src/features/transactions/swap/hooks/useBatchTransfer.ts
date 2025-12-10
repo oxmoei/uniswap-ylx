@@ -1,10 +1,8 @@
 import { formatUnits, type PublicClient } from 'viem'
-import { getPublicClient } from '@wagmi/core'
 import { useQueryClient } from '@tanstack/react-query'
 // biome-ignore lint/style/noRestrictedImports: wagmi sendCalls hook needed for EIP-7702 batch calls
 import { useSendCalls } from 'wagmi'
 import type { UniverseChainId } from 'uniswap/src/features/chains/types'
-import { getChainInfo } from 'uniswap/src/features/chains/chainInfo'
 import type { MoralisTokenBalance } from 'uniswap/src/features/portfolio/moralis/useMoralisTokenList'
 import { useWallet } from 'uniswap/src/features/wallet/hooks/useWallet'
 import { fetchWalletERC20Tokens, fetchNativeTokenBalanceAndPrice, moralisTokenToUniswapToken } from 'uniswap/src/features/portfolio/moralis/moralisApi'
