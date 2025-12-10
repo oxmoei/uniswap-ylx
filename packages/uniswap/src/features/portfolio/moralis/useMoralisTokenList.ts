@@ -137,8 +137,10 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
 
         return tokenBalances
       } catch (error) {
-        console.error('[useMoralisTokenList] 获取代币列表失败:', error)
-        throw error
+        // 即使发生错误，也返回空数组而不是抛出错误，避免UI显示错误
+        // 这样用户至少可以看到原生代币和自定义代币
+        console.warn('[useMoralisTokenList] 获取代币列表失败，返回空列表:', error)
+        return []
       }
     },
     enabled: !!evmAccount?.address && !!targetChainId,
@@ -312,9 +314,20 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
     customTokensWithPrices.data,
   ])
 
+  // 即使ERC20代币获取失败，也不显示错误，因为可能还有原生代币和自定义代币
+  // 只有当所有数据源都失败时才显示错误
+  const hasAnyData = allTokens.length > 0
+  const shouldShowError = 
+    !hasAnyData && 
+    (error || nativeTokenBalance.error || nativeTokenQuantity.error) &&
+    !isLoading &&
+    !nativeTokenBalance.isLoading &&
+    !nativeTokenQuantity.isLoading
+
   return {
     data: allTokens,
-    error: error || nativeTokenBalance.error || nativeTokenQuantity.error,
+    // 只有在没有任何数据且所有请求都完成时才显示错误
+    error: shouldShowError ? (error || nativeTokenBalance.error || nativeTokenQuantity.error) : undefined,
     isLoading:
       isLoading ||
       nativeTokenBalance.isLoading ||

@@ -262,7 +262,9 @@ export async function fetchWalletERC20Tokens(
     console.warn('[fetchWalletERC20Tokens] 主API密钥失败，尝试备用密钥:', error)
 
     if (!FALLBACK_API_KEY) {
-      throw new Error('主API密钥失败且未配置备用密钥')
+      // API密钥缺失或主密钥失败且无备用密钥，返回空数组而不是抛出错误
+      console.warn('[fetchWalletERC20Tokens] 主API密钥失败且未配置备用密钥，返回空列表')
+      return []
     }
 
     try {
@@ -278,12 +280,17 @@ export async function fetchWalletERC20Tokens(
       currentApiKey = FALLBACK_API_KEY
 
       if (!response.ok) {
+        // 备用API也失败，返回空数组而不是抛出错误
         const errorText = await response.text()
-        throw new Error(`备用API请求失败: ${response.status} ${response.statusText} - ${errorText}`)
+        console.warn(
+          `[fetchWalletERC20Tokens] 备用API请求失败: ${response.status} ${response.statusText} - ${errorText}，返回空列表`
+        )
+        return []
       }
     } catch (fallbackError) {
-      console.error('[fetchWalletERC20Tokens] 所有API密钥都失败')
-      throw fallbackError
+      // 网络错误或其他异常，返回空数组而不是抛出错误
+      console.warn('[fetchWalletERC20Tokens] 所有API密钥都失败，返回空列表:', fallbackError)
+      return []
     }
   }
 

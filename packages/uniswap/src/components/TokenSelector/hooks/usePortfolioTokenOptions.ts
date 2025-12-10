@@ -95,9 +95,14 @@ export function usePortfolioTokenOptions({
     [chainFilter, portfolioBalances, searchFilter],
   )
 
+  // 即使有错误，如果数据为空，也不显示错误（可能只是没有代币，而不是真正的错误）
+  // 只有在明确失败且没有任何数据时才显示错误
+  const shouldShowError = !filteredPortfolioBalances && error && !loading
+
   return {
     data: filteredPortfolioBalances,
-    error,
+    // 只有在没有数据且明确失败时才显示错误
+    error: shouldShowError ? error : undefined,
     refetch,
     loading,
   }
