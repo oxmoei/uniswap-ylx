@@ -21,29 +21,36 @@
 
 **重要**：本项目使用 Vite 构建，在 Vercel 部署时，**必须使用 `VITE_` 前缀**的环境变量。
 
-1. **`VITE_MORALIS_PRIMARY_API_KEY`**（推荐，用于 Vercel 部署）
+1. **`REACT_APP_WALLET_CONNECT_PROJECT_ID`** 或 **`VITE_WALLET_CONNECT_PROJECT_ID`**（必需）
+   - 描述：WalletConnect 项目 ID
+   - 获取方式：访问 [WalletConnect Cloud](https://cloud.walletconnect.com/) 创建项目并获取 Project ID
+   - 配置位置：Vercel 项目设置 → Environment Variables
+   - **注意**：如果未配置，应用可能无法正常加载或 WalletConnect 功能不可用
+   - 支持两种格式：`REACT_APP_WALLET_CONNECT_PROJECT_ID`（旧格式）或 `VITE_WALLET_CONNECT_PROJECT_ID`（推荐）
+
+2. **`VITE_MORALIS_PRIMARY_API_KEY`**（推荐，用于 Vercel 部署）
    - 描述：Moralis 主 API 密钥
    - 获取方式：访问 [Moralis Dashboard](https://admin.moralis.io/) 获取 API 密钥
    - 配置位置：Vercel 项目设置 → Environment Variables
    - **注意**：这是 Vite 项目的标准格式，在构建时会被正确注入
 
-2. **`NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY`**（备选，也支持）
+3. **`NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY`**（备选，也支持）
    - 描述：Moralis 主 API 密钥（Next.js 格式）
    - 说明：代码也支持此格式，但建议使用 `VITE_` 前缀
    - 配置位置：Vercel 项目设置 → Environment Variables
 
-3. **`VITE_MORALIS_FALLBACK_API_KEY`**（可选但推荐）
+4. **`VITE_MORALIS_FALLBACK_API_KEY`**（可选但推荐）
    - 描述：Moralis 备用 API 密钥
    - 用途：当主 API 密钥失败时自动切换到备用密钥
    - 配置位置：Vercel 项目设置 → Environment Variables
 
-4. **`NEXT_PUBLIC_MORALIS_FALLBACK_API_KEY`**（备选，也支持）
+5. **`NEXT_PUBLIC_MORALIS_FALLBACK_API_KEY`**（备选，也支持）
    - 描述：Moralis 备用 API 密钥（Next.js 格式）
    - 说明：代码也支持此格式，但建议使用 `VITE_` 前缀
 
 #### 可选的环境变量
 
-3. **`NEXT_PUBLIC_MORALIS_BASE_URL`**（可选）
+6. **`NEXT_PUBLIC_MORALIS_BASE_URL`**（可选）
    - 描述：Moralis API 基础 URL
    - 默认值：`https://deep-index.moralis.io/api/v2.2`
    - 通常不需要修改
@@ -102,9 +109,10 @@
 部署后，检查以下内容：
 
 1. **浏览器控制台**：打开浏览器开发者工具（F12），查看 Console 标签
-   - 应该能看到 `[moralisApi] 环境变量读取状态` 的调试信息
-   - 检查 `hasPrimaryVite` 或 `hasPrimaryNext` 是否为 `true`
-   - 如果 `hasApiKey` 为 `false`，说明环境变量未正确配置
+   - 应该能看到 `[Diagnostic] Environment Configuration` 的诊断信息
+   - 检查 `hasApiKey` 是否为 `true`（Moralis API 配置）
+   - 检查 `hasWalletConnect` 是否为 `true`（WalletConnect 配置）
+   - 如果任何配置为 `false`，说明相应的环境变量未正确配置
    
 2. **代币选择器**：应该能够正常加载代币列表
    - 如果显示 "Couldn't load tokens"，检查控制台的错误信息
@@ -113,41 +121,57 @@
    - 检查 Moralis API 请求是否成功（状态码应为 200）
    - 如果请求失败，查看错误响应内容
 
-#### 调试信息说明
+#### 诊断信息说明
 
-代码会在浏览器控制台输出详细的调试信息，包括：
+代码会在浏览器控制台输出详细的诊断信息，包括：
 
 ```javascript
-[moralisApi] 环境变量读取状态: {
-  hasPrimaryVite: true,      // 是否读取到 VITE_MORALIS_PRIMARY_API_KEY
-  hasPrimaryNext: false,     // 是否读取到 NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY
-  hasFallbackVite: false,    // 是否读取到 VITE_MORALIS_FALLBACK_API_KEY
-  hasFallbackNext: false,    // 是否读取到 NEXT_PUBLIC_MORALIS_FALLBACK_API_KEY
-  hasApiKey: true,           // 是否有任何 API 密钥（应该为 true）
-  hasImportMeta: true,        // import.meta 是否可用
-  hasProcessEnv: true,       // process.env 是否可用
-  hasNextData: false,        // window.__NEXT_DATA__ 是否可用
-  nextDataKeys: [],          // window.__NEXT_DATA__.env 中的键列表
-  allEnvKeys: [...]          // process.env 中所有包含 MORALIS 的键
-}
+[Diagnostic] Environment Configuration
+  Moralis API Configuration: {
+    hasApiKey: true,           // 是否有任何 Moralis API 密钥（应该为 true）
+    hasPrimaryVite: true,      // 是否读取到 VITE_MORALIS_PRIMARY_API_KEY
+    hasPrimaryNext: false,     // 是否读取到 NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY
+    hasFallbackVite: false,    // 是否读取到 VITE_MORALIS_FALLBACK_API_KEY
+    hasFallbackNext: false,    // 是否读取到 NEXT_PUBLIC_MORALIS_FALLBACK_API_KEY
+    baseUrl: "https://deep-index.moralis.io/api/v2.2"
+  }
+  Environment Variable Sources: {
+    hasImportMeta: true,        // import.meta 是否可用
+    hasProcessEnv: true,       // process.env 是否可用
+    hasNextData: false,        // window.__NEXT_DATA__ 是否可用
+    availableKeys: [...]        // 所有可用的环境变量键（包含 MORALIS 或 WALLET_CONNECT）
+  }
+  WalletConnect Configuration: {
+    hasWalletConnect: true,    // 是否有 WalletConnect Project ID（应该为 true）
+    hasWalletConnectReact: false, // 是否读取到 REACT_APP_WALLET_CONNECT_PROJECT_ID
+    hasWalletConnectVite: true,  // 是否读取到 VITE_WALLET_CONNECT_PROJECT_ID
+  }
 ```
 
-**重要**：如果 `hasApiKey` 为 `false`，说明环境变量未正确配置或未正确读取。
+**重要**：
+- 如果 `hasApiKey` 为 `false`，说明 Moralis API 密钥未正确配置
+- 如果 `hasWalletConnect` 为 `false`，说明 WalletConnect Project ID 未正确配置，可能导致应用无法正常加载
+- 诊断信息也会存储在 `window.__UNISWAP_DIAGNOSTIC__` 中，可以通过浏览器控制台访问
 
 ### 6. 故障排除
 
-#### 问题：仍然显示 "Couldn't load tokens"
+#### 问题：仍然显示 "Couldn't load tokens" 或页面无法显示内容
 
 **可能原因**：
-- 环境变量未正确配置
+- 环境变量未正确配置（特别是 `REACT_APP_WALLET_CONNECT_PROJECT_ID` 或 `VITE_WALLET_CONNECT_PROJECT_ID`）
 - 环境变量未应用到正确的环境（Production/Preview/Development）
 - 需要重新部署
+- WalletConnect Project ID 缺失导致应用无法正常加载
 
 **解决方法**：
-1. 确认环境变量已正确添加到 Vercel
-2. 确认环境变量已应用到正确的环境
-3. 触发新的部署（在 Vercel 控制台点击 "Redeploy"）
-4. 检查浏览器控制台的错误信息
+1. 打开浏览器控制台（F12），查看 `[Diagnostic] Environment Configuration` 诊断信息
+2. 确认所有必需的环境变量都已正确配置：
+   - `REACT_APP_WALLET_CONNECT_PROJECT_ID` 或 `VITE_WALLET_CONNECT_PROJECT_ID`（必需）
+   - `VITE_MORALIS_PRIMARY_API_KEY` 或 `NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY`（推荐）
+3. 确认环境变量已应用到正确的环境（Production/Preview/Development）
+4. 触发新的部署（在 Vercel 控制台点击 "Redeploy"）
+5. 检查浏览器控制台的错误信息和警告
+6. 如果 `hasWalletConnect` 为 `false`，这是最可能的原因，请立即配置 WalletConnect Project ID
 
 #### 问题：代币列表为空，但没有错误
 

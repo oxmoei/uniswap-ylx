@@ -64,6 +64,110 @@ const FALLBACK_API_KEY =
   ''
 
 /**
+ * Diagnostic function to check environment variable configuration
+ * This helps identify configuration issues in production
+ */
+export function diagnoseEnvironmentConfig(): void {
+  if (typeof window === 'undefined') {
+    return // Only run in browser
+  }
+
+  const hasPrimaryVite = !!getEnvVar('VITE_MORALIS_PRIMARY_API_KEY')
+  const hasPrimaryNext = !!getEnvVar('NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY')
+  const hasFallbackVite = !!getEnvVar('VITE_MORALIS_FALLBACK_API_KEY')
+  const hasFallbackNext = !!getEnvVar('NEXT_PUBLIC_MORALIS_FALLBACK_API_KEY')
+  const hasApiKey = hasPrimaryVite || hasPrimaryNext || hasFallbackVite || hasFallbackNext
+
+  const hasImportMeta = typeof import.meta !== 'undefined' && !!import.meta.env
+  const hasProcessEnv = typeof process !== 'undefined' && !!process.env
+  const hasNextData = typeof window !== 'undefined' && !!(window as any).__NEXT_DATA__?.env
+
+  const allEnvKeys: string[] = []
+  try {
+    if (hasProcessEnv) {
+      Object.keys(process.env).forEach((key) => {
+        if (key.includes('MORALIS') || key.includes('WALLET_CONNECT')) {
+          allEnvKeys.push(key)
+        }
+      })
+    }
+  } catch {
+    // Ignore errors
+  }
+
+  const diagnosticInfo = {
+    hasPrimaryVite,
+    hasPrimaryNext,
+    hasFallbackVite,
+    hasFallbackNext,
+    hasApiKey,
+    hasImportMeta,
+    hasProcessEnv,
+    hasNextData,
+    allEnvKeys,
+    moralisBaseUrl: MORALIS_BASE_URL,
+  }
+
+  // Log diagnostic info to console for debugging
+  console.group('[Diagnostic] Environment Configuration')
+  console.log('Moralis API Configuration:', {
+    hasApiKey,
+    hasPrimaryVite,
+    hasPrimaryNext,
+    hasFallbackVite,
+    hasFallbackNext,
+    baseUrl: MORALIS_BASE_URL,
+  })
+  console.log('Environment Variable Sources:', {
+    hasImportMeta,
+    hasProcessEnv,
+    hasNextData,
+    availableKeys: allEnvKeys,
+  })
+  
+  if (!hasApiKey) {
+    console.warn(
+      '⚠️ Moralis API keys are not configured. ' +
+      'Please set VITE_MORALIS_PRIMARY_API_KEY or NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY in Vercel environment variables.'
+    )
+  }
+  
+  // Check WalletConnect Project ID
+  const hasWalletConnectReact = !!(process.env.REACT_APP_WALLET_CONNECT_PROJECT_ID)
+  // @ts-expect-error - import.meta.env is available in Vite runtime
+  const hasWalletConnectVite = typeof import.meta !== 'undefined' && !!import.meta.env?.VITE_WALLET_CONNECT_PROJECT_ID
+  const hasWalletConnect = hasWalletConnectReact || hasWalletConnectVite
+  
+  console.log('WalletConnect Configuration:', {
+    hasWalletConnect,
+    hasWalletConnectReact,
+    hasWalletConnectVite,
+  })
+  
+  if (!hasWalletConnect) {
+    console.warn(
+      '⚠️ WalletConnect Project ID is not configured. ' +
+      'Please set REACT_APP_WALLET_CONNECT_PROJECT_ID or VITE_WALLET_CONNECT_PROJECT_ID in Vercel environment variables.'
+    )
+  }
+  
+  console.groupEnd()
+
+  // Store diagnostic info for potential error reporting
+  if (typeof window !== 'undefined') {
+    ;(window as any).__UNISWAP_DIAGNOSTIC__ = diagnosticInfo
+  }
+}
+
+// Run diagnostic on module load (in browser only)
+if (typeof window !== 'undefined') {
+  // Use setTimeout to ensure it runs after other initialization
+  setTimeout(() => {
+    diagnoseEnvironmentConfig()
+  }, 100)
+}
+
+/**
  * 链ID到Moralis链名称的映射
  */
 const CHAIN_NAME_MAP: Record<number, string> = {

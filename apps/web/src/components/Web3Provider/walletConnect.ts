@@ -3,10 +3,42 @@ import { isDevEnv } from 'utilities/src/environment/env'
 import { createConnector } from 'wagmi'
 import { walletConnect } from 'wagmi/connectors'
 
-if (process.env.REACT_APP_WALLET_CONNECT_PROJECT_ID === undefined) {
-  throw new Error('REACT_APP_WALLET_CONNECT_PROJECT_ID must be a defined environment variable')
+// Get WalletConnect Project ID from environment variables
+// Support both REACT_APP_ and VITE_ prefixes for compatibility
+function getWalletConnectProjectId(): string {
+  // Try REACT_APP_ prefix first (legacy)
+  if (process.env.REACT_APP_WALLET_CONNECT_PROJECT_ID) {
+    return process.env.REACT_APP_WALLET_CONNECT_PROJECT_ID
+  }
+  
+  // Try VITE_ prefix (Vite standard)
+  // @ts-expect-error - import.meta.env is available in Vite runtime
+  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_WALLET_CONNECT_PROJECT_ID) {
+    // @ts-expect-error - import.meta.env is available in Vite runtime
+    return import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID
+  }
+  
+  // Try process.env with VITE_ prefix (fallback)
+  if (process.env.VITE_WALLET_CONNECT_PROJECT_ID) {
+    return process.env.VITE_WALLET_CONNECT_PROJECT_ID
+  }
+  
+  // If not found, log warning but don't throw error
+  // This allows the app to load, but WalletConnect features won't work
+  if (typeof window !== 'undefined') {
+    console.warn(
+      '[walletConnect] REACT_APP_WALLET_CONNECT_PROJECT_ID or VITE_WALLET_CONNECT_PROJECT_ID is not defined. ' +
+      'WalletConnect features will not be available. ' +
+      'Please configure this environment variable in Vercel.'
+    )
+  }
+  
+  // Return a placeholder value to prevent errors
+  // The connector will fail gracefully if this is invalid
+  return ''
 }
-const WALLET_CONNECT_PROJECT_ID = <string>process.env.REACT_APP_WALLET_CONNECT_PROJECT_ID
+
+const WALLET_CONNECT_PROJECT_ID = getWalletConnectProjectId()
 
 export function walletTypeToAmplitudeWalletType(connectionType?: string): string {
   switch (connectionType) {
