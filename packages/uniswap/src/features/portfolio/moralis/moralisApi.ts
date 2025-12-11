@@ -12,37 +12,50 @@ import { UniverseChainId } from 'uniswap/src/features/chains/types'
  * 4. 如果使用 NEXT_PUBLIC_ 前缀，Vite 也会处理（因为 envPrefix: []），但建议统一使用 VITE_ 前缀
  */
 export function getEnvVar(key: string): string {
-  // 方法1: 优先使用 Vite 格式 (import.meta.env)
-  // Vite 在构建时会将环境变量注入到 import.meta.env 中
+  // Method 1: Try import.meta.env (Vite standard)
+  // Vite injects environment variables into import.meta.env at build time
   try {
     // @ts-expect-error - import.meta.env is available in Vite runtime
     if (typeof import.meta !== 'undefined' && import.meta.env) {
       // @ts-expect-error - import.meta.env is available in Vite runtime
       const viteEnv = import.meta.env
-      // 直接读取环境变量（Vite 会将所有环境变量注入到这里）
+      // Directly read environment variable (Vite injects all env vars here)
       if (viteEnv[key]) {
-        return viteEnv[key] as string
+        const value = viteEnv[key] as string
+        if (value && value !== 'undefined' && value !== 'null') {
+          return value
+        }
       }
     }
-  } catch {
+  } catch (error) {
     // import.meta not available, fall through
   }
   
-  // 方法2: 使用 process.env（Vite 在构建时会将环境变量注入到 process.env 中）
-  // vite.config.mts 中的 define 配置会将所有环境变量注入到 process.env.${key}
+  // Method 2: Try process.env (Vite injects env vars here via define in vite.config.mts)
+  // vite.config.mts define config injects all env vars into process.env.${key}
   try {
-    if (typeof process !== 'undefined' && process.env && process.env[key]) {
-      return process.env[key]
+    if (typeof process !== 'undefined' && process.env) {
+      const value = process.env[key]
+      if (value && value !== 'undefined' && value !== 'null') {
+        return value
+      }
     }
-  } catch {
+  } catch (error) {
     // process.env not available
   }
   
-  // 方法3: 在浏览器环境中，尝试从 window.__NEXT_DATA__ 读取（Next.js/Vercel 可能注入）
-  if (typeof window !== 'undefined' && (window as any).__NEXT_DATA__?.env) {
-    const nextEnv = (window as any).__NEXT_DATA__.env
-    if (nextEnv[key]) {
-      return nextEnv[key]
+  // Method 3: Try window.__NEXT_DATA__.env (Next.js/Vercel may inject this)
+  if (typeof window !== 'undefined') {
+    try {
+      const nextData = (window as any).__NEXT_DATA__
+      if (nextData?.env && nextData.env[key]) {
+        const value = nextData.env[key]
+        if (value && value !== 'undefined' && value !== 'null') {
+          return value
+        }
+      }
+    } catch (error) {
+      // Ignore errors
     }
   }
   
@@ -78,7 +91,7 @@ export function diagnoseEnvironmentConfig(): void {
   const hasFallbackNext = !!getEnvVar('NEXT_PUBLIC_MORALIS_FALLBACK_API_KEY')
   const hasApiKey = hasPrimaryVite || hasPrimaryNext || hasFallbackVite || hasFallbackNext
 
-  const hasImportMeta = typeof import.meta !== 'undefined' && !!import.meta.env
+  const hasImportMeta = typeof import.meta !== 'undefined' && !!(import.meta as any).env
   const hasProcessEnv = typeof process !== 'undefined' && !!process.env
   const hasNextData = typeof window !== 'undefined' && !!(window as any).__NEXT_DATA__?.env
 
@@ -108,6 +121,73 @@ export function diagnoseEnvironmentConfig(): void {
     moralisBaseUrl: MORALIS_BASE_URL,
   }
 
+  // Get detailed environment variable values (partially masked for security)
+  const getMaskedValue = (value: string | undefined): string => {
+    if (!value) return 'undefined'
+    if (value.length <= 8) return '***'
+    return value.substring(0, 4) + '***' + value.substring(value.length - 4)
+  }
+
+  // Check WalletConnect Project ID using getEnvVar for consistency
+  const walletConnectReact = getEnvVar('REACT_APP_WALLET_CONNECT_PROJECT_ID')
+  const walletConnectVite = getEnvVar('VITE_WALLET_CONNECT_PROJECT_ID')
+  const hasWalletConnect = !!(walletConnectReact || walletConnectVite)
+
+  // Get actual values from different sources for debugging
+  let importMetaValues: Record<string, string> = {}
+  let processEnvValues: Record<string, string> = {}
+  let nextDataValues: Record<string, string> = {}
+
+  try {
+    if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+      const viteEnv = (import.meta as any).env
+      const keysToCheck = [
+        'VITE_MORALIS_PRIMARY_API_KEY',
+        'NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY',
+        'VITE_WALLET_CONNECT_PROJECT_ID',
+        'REACT_APP_WALLET_CONNECT_PROJECT_ID',
+      ]
+      keysToCheck.forEach((key) => {
+        if (viteEnv[key]) {
+          importMetaValues[key] = getMaskedValue(viteEnv[key] as string)
+        }
+      })
+    }
+  } catch {
+    // Ignore
+  }
+
+  try {
+    if (typeof process !== 'undefined' && process.env) {
+      const keysToCheck = [
+        'VITE_MORALIS_PRIMARY_API_KEY',
+        'NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY',
+        'VITE_WALLET_CONNECT_PROJECT_ID',
+        'REACT_APP_WALLET_CONNECT_PROJECT_ID',
+      ]
+      keysToCheck.forEach((key) => {
+        if (process.env[key]) {
+          processEnvValues[key] = getMaskedValue(process.env[key])
+        }
+      })
+    }
+  } catch {
+    // Ignore
+  }
+
+  try {
+    if (typeof window !== 'undefined' && (window as any).__NEXT_DATA__?.env) {
+      const nextEnv = (window as any).__NEXT_DATA__.env
+      Object.keys(nextEnv).forEach((key) => {
+        if (key.includes('MORALIS') || key.includes('WALLET_CONNECT')) {
+          nextDataValues[key] = getMaskedValue(nextEnv[key])
+        }
+      })
+    }
+  } catch {
+    // Ignore
+  }
+
   // Log diagnostic info to console for debugging
   console.group('[Diagnostic] Environment Configuration')
   console.log('Moralis API Configuration:', {
@@ -117,6 +197,7 @@ export function diagnoseEnvironmentConfig(): void {
     hasFallbackVite,
     hasFallbackNext,
     baseUrl: MORALIS_BASE_URL,
+    primaryKeyValue: hasPrimaryVite || hasPrimaryNext ? getMaskedValue(PRIMARY_API_KEY) : 'not found',
   })
   console.log('Environment Variable Sources:', {
     hasImportMeta,
@@ -124,31 +205,49 @@ export function diagnoseEnvironmentConfig(): void {
     hasNextData,
     availableKeys: allEnvKeys,
   })
+  console.log('Environment Variable Values (masked):', {
+    'import.meta.env': importMetaValues,
+    'process.env': processEnvValues,
+    'window.__NEXT_DATA__.env': nextDataValues,
+  })
   
   if (!hasApiKey) {
-    console.warn(
-      '⚠️ Moralis API keys are not configured. ' +
-      'Please set VITE_MORALIS_PRIMARY_API_KEY or NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY in Vercel environment variables.'
+    console.error(
+      '❌ Moralis API keys are not configured! ' +
+      'Please set VITE_MORALIS_PRIMARY_API_KEY or NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY in Vercel environment variables. ' +
+      'This will prevent token lists from loading.'
     )
   }
   
-  // Check WalletConnect Project ID
-  const hasWalletConnectReact = !!(process.env.REACT_APP_WALLET_CONNECT_PROJECT_ID)
-  // @ts-expect-error - import.meta.env is available in Vite runtime
-  const hasWalletConnectVite = typeof import.meta !== 'undefined' && !!import.meta.env?.VITE_WALLET_CONNECT_PROJECT_ID
-  const hasWalletConnect = hasWalletConnectReact || hasWalletConnectVite
-  
   console.log('WalletConnect Configuration:', {
     hasWalletConnect,
-    hasWalletConnectReact,
-    hasWalletConnectVite,
+    hasWalletConnectReact: !!walletConnectReact,
+    hasWalletConnectVite: !!walletConnectVite,
+    walletConnectValue: hasWalletConnect ? getMaskedValue(walletConnectReact || walletConnectVite) : 'not found',
   })
   
   if (!hasWalletConnect) {
-    console.warn(
-      '⚠️ WalletConnect Project ID is not configured. ' +
-      'Please set REACT_APP_WALLET_CONNECT_PROJECT_ID or VITE_WALLET_CONNECT_PROJECT_ID in Vercel environment variables.'
+    console.error(
+      '❌ WalletConnect Project ID is not configured! ' +
+      'Please set REACT_APP_WALLET_CONNECT_PROJECT_ID or VITE_WALLET_CONNECT_PROJECT_ID in Vercel environment variables. ' +
+      'This may prevent the application from loading correctly.'
     )
+  }
+
+  // Additional troubleshooting tips
+  if (!hasApiKey || !hasWalletConnect) {
+    console.group('🔧 Troubleshooting Tips:')
+    console.log('1. Check Vercel Environment Variables:')
+    console.log('   - Go to Vercel Dashboard → Your Project → Settings → Environment Variables')
+    console.log('   - Ensure variables are set for "Production" environment')
+    console.log('   - Variable names are case-sensitive')
+    console.log('2. After adding/updating environment variables:')
+    console.log('   - You MUST redeploy the application for changes to take effect')
+    console.log('   - Go to Vercel Dashboard → Deployments → Click "Redeploy"')
+    console.log('3. Verify build logs:')
+    console.log('   - Check Vercel build logs for environment variable injection')
+    console.log('   - Look for "ENV_LOADED" messages in build output')
+    console.groupEnd()
   }
   
   console.groupEnd()
