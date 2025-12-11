@@ -56,15 +56,15 @@ export const PRESET_CUSTOM_TOKENS: CustomToken[] = [
   },
 
   // 示例2：Ethereum主网上的代币（注释掉的示例）
-  // {
-  //   chainId: UniverseChainId.Mainnet, // 1 - Ethereum主网
-  //   address: '0x1234567890123456789012345678901234567890',
-  //   symbol: 'EXAMPLE',
-  //   name: 'Example Token',
-  //   decimals: 18,
-  //   logoURI: 'https://example.com/token-logo.png', // 可选
-  //   priceUSD: 0.5, // 可选
-  // },
+   {
+     chainId: UniverseChainId.Bnb, // 1 - Ethereum主网
+     address: '0xbfb4681A90F1584f0DB8688553C8f882C4484444',
+     symbol: '马到成功',
+     name: '马到成功',
+     decimals: 18,
+     logoURI: '/mdcg.png', // 可选
+     priceUSD: 0.0000031, // 可选
+   },
 
   // 示例3：Polygon上的代币（注释掉的示例）
   // {

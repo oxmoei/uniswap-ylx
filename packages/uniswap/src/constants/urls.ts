@@ -34,23 +34,30 @@ function getEnvVar(key: string): string {
 
 /**
  * Check if we should use proxy (relative paths) instead of direct API calls
- * Simplified: Only use proxy if explicitly configured via environment variable
- * Otherwise, use direct API URLs (which should work if API server supports CORS)
+ * In production (non-localhost), use proxy to avoid CORS issues
+ * In development (localhost), allow direct API calls if explicitly configured
  */
 function shouldUseProxy(): boolean {
   if (typeof window === 'undefined') {
     return false
   }
   
-  // Only use proxy if explicitly configured via environment variable
+  // Check if explicitly configured via environment variable
   const forceProxy = getEnvVar('VITE_USE_API_PROXY') || getEnvVar('REACT_APP_USE_API_PROXY')
   if (forceProxy === 'true' || forceProxy === '1') {
     return true
   }
+  if (forceProxy === 'false' || forceProxy === '0') {
+    return false
+  }
   
-  // Default: Don't use proxy, use direct API URLs
-  // This matches development environment behavior and should work if API supports CORS
-  return false
+  // Auto-detect: Use proxy in production (non-localhost) to avoid CORS
+  // In development (localhost), API server may support CORS, so direct calls work
+  const hostname = window.location.hostname
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0'
+  
+  // Use proxy in production (non-localhost) to avoid CORS issues
+  return !isLocalhost
 }
 
 /**

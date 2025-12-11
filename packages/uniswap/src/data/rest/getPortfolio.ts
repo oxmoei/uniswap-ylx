@@ -1,5 +1,5 @@
 import { PartialMessage } from '@bufbuild/protobuf'
-import { createPromiseClient } from '@connectrpc/connect'
+import { ConnectError, createPromiseClient } from '@connectrpc/connect'
 import { Query, queryOptions, UseQueryResult, useQuery } from '@tanstack/react-query'
 import { DataApiService } from '@uniswap/client-data-api/dist/data/v1/api_connect'
 import { GetPortfolioRequest, GetPortfolioResponse } from '@uniswap/client-data-api/dist/data/v1/api_pb'
@@ -103,15 +103,34 @@ export const getPortfolioQuery = <TSelectData = GetPortfolioResponse>({
       if (failureCount >= 3) {
         return false
       }
-      // Retry for network errors and connection errors
+      // Retry for ConnectError (network errors, unavailable, internal errors, etc.)
+      if (error instanceof ConnectError) {
+        const code = error.code
+        // Retry for network errors, unavailable, and internal errors
+        if (
+          code === 'unavailable' ||
+          code === 'internal' ||
+          code === 'deadline_exceeded' ||
+          code === 'resource_exhausted' ||
+          code === 'aborted'
+        ) {
+          return true
+        }
+      }
+      // Also retry for general network errors
       if (error instanceof Error) {
         const errorMessage = error.message.toLowerCase()
         if (
           errorMessage.includes('network') ||
           errorMessage.includes('fetch') ||
           errorMessage.includes('timeout') ||
-          errorMessage.includes('failed')
+          errorMessage.includes('failed') ||
+          errorMessage.includes('cors')
         ) {
+          return true
+        }
+        // Retry for NetworkError
+        if (error.name === 'NetworkError' || error.name === 'TypeError') {
           return true
         }
       }
