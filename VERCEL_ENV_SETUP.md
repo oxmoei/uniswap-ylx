@@ -2,7 +2,12 @@
 
 ## 问题描述
 
-部署到 Vercel 后，代币选择器可能显示 "Couldn't load tokens" 错误。这通常是因为 Moralis API 密钥未正确配置。
+部署到 Vercel 后，可能遇到以下问题：
+1. 代币选择器显示 "Couldn't load tokens" 错误（通常是 Moralis API 密钥未正确配置）
+2. **CORS 错误**：`Access to fetch at 'https://interface.gateway.uniswap.org/...' from origin 'https://www.www-uniswap.org' has been blocked by CORS policy`
+   - 这是因为应用部署的域名与 API 服务器的域名不匹配
+   - API 服务器可能只允许特定域名（如 `app.uniswap.org`）访问
+   - **解决方案**：已在 `vercel.json` 中配置代理，将 API 请求代理到正确的端点
 
 ## 解决方案
 

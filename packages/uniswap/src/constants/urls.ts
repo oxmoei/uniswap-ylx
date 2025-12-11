@@ -2,6 +2,110 @@ import { createHelpArticleUrl, getCloudflareApiBaseUrl, helpUrl, TrafficFlows } 
 import { config } from 'uniswap/src/config'
 import { isDevEnv, isPlaywrightEnv } from 'utilities/src/environment/env'
 
+/**
+ * Get environment variable with support for multiple prefixes
+ */
+function getEnvVar(key: string): string {
+  // Try Vite format (import.meta.env)
+  try {
+    // @ts-expect-error - import.meta.env is available in Vite runtime
+    if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+      // @ts-expect-error - import.meta.env is available in Vite runtime
+      const viteEnv = (import.meta as any).env
+      if (viteEnv[key]) {
+        return viteEnv[key] as string
+      }
+    }
+  } catch {
+    // Ignore
+  }
+  
+  // Try process.env
+  try {
+    if (typeof process !== 'undefined' && process.env && process.env[key]) {
+      return process.env[key]
+    }
+  } catch {
+    // Ignore
+  }
+  
+  return ''
+}
+
+/**
+ * Check if we should use proxy (relative paths) instead of direct API calls
+ * This is needed when the app is deployed on a different domain than expected
+ * (e.g., www.www-uniswap.org instead of app.uniswap.org)
+ */
+function shouldUseProxy(): boolean {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  
+  const currentOrigin = window.location.origin
+  const expectedOrigin = 'https://app.uniswap.org'
+  
+  // If deployed on a different domain, use proxy to avoid CORS issues
+  if (currentOrigin !== expectedOrigin && !currentOrigin.includes('localhost') && !currentOrigin.includes('127.0.0.1')) {
+    return true
+  }
+  
+  // Check environment variable to force proxy usage
+  const forceProxy = getEnvVar('VITE_USE_API_PROXY') || getEnvVar('REACT_APP_USE_API_PROXY')
+  if (forceProxy === 'true' || forceProxy === '1') {
+    return true
+  }
+  
+  return false
+}
+
+/**
+ * Get API base URL with proxy support
+ * If VITE_API_BASE_URL or REACT_APP_API_BASE_URL is set, use it (for proxy support)
+ * If shouldUseProxy() returns true, use relative path '/api' (will be proxied by Vercel)
+ * Otherwise, use the default Cloudflare API base URL
+ */
+function getApiBaseUrl(): string {
+  // Check for environment variable override (for proxy support)
+  const envOverride = 
+    getEnvVar('VITE_API_BASE_URL') || 
+    getEnvVar('REACT_APP_API_BASE_URL') || 
+    getEnvVar('NEXT_PUBLIC_API_BASE_URL')
+  
+  if (envOverride) {
+    return envOverride
+  }
+  
+  // If we should use proxy, return relative path (will be proxied by Vercel)
+  if (shouldUseProxy()) {
+    return '/api'
+  }
+  
+  // Use default Cloudflare API base URL
+  return getCloudflareApiBaseUrl()
+}
+
+/**
+ * Get API base URL V2 with proxy support
+ */
+function getApiBaseUrlV2(): string {
+  const envOverride = 
+    getEnvVar('VITE_API_BASE_URL_V2') || 
+    getEnvVar('REACT_APP_API_BASE_URL_V2') || 
+    getEnvVar('NEXT_PUBLIC_API_BASE_URL_V2')
+  
+  if (envOverride) {
+    return envOverride
+  }
+  
+  // If we should use proxy, return relative path (will be proxied by Vercel)
+  if (shouldUseProxy()) {
+    return '/api/v2'
+  }
+  
+  return `${getApiBaseUrl()}/v2`
+}
+
 export const UNISWAP_WEB_HOSTNAME = 'app.uniswap.org'
 const EMBEDDED_WALLET_HOSTNAME = isPlaywrightEnv() || isDevEnv() ? 'staging.ew.unihq.org' : UNISWAP_WEB_HOSTNAME
 
@@ -112,21 +216,21 @@ export const uniswapUrls = {
 
   // Core API Urls
   apiOrigin: 'https://api.uniswap.org',
-  apiBaseUrl: config.apiBaseUrlOverride || getCloudflareApiBaseUrl(),
-  apiBaseUrlV2: config.apiBaseUrlV2Override || `${getCloudflareApiBaseUrl()}/v2`,
-  graphQLUrl: config.graphqlUrlOverride || `${getCloudflareApiBaseUrl(TrafficFlows.GraphQL)}/v1/graphql`,
+  apiBaseUrl: config.apiBaseUrlOverride || getApiBaseUrl(),
+  apiBaseUrlV2: config.apiBaseUrlV2Override || getApiBaseUrlV2(),
+  graphQLUrl: config.graphqlUrlOverride || (shouldUseProxy() ? '/api/v1/graphql' : `${getCloudflareApiBaseUrl(TrafficFlows.GraphQL)}/v1/graphql`),
 
   // Proxies
   amplitudeProxyUrl:
-    config.amplitudeProxyUrlOverride || `${getCloudflareApiBaseUrl(TrafficFlows.Metrics)}/v1/amplitude-proxy`,
-  statsigProxyUrl: config.statsigProxyUrlOverride || `${getCloudflareApiBaseUrl(TrafficFlows.Gating)}/v1/statsig-proxy`,
+    config.amplitudeProxyUrlOverride || (shouldUseProxy() ? '/api/v1/amplitude-proxy' : `${getCloudflareApiBaseUrl(TrafficFlows.Metrics)}/v1/amplitude-proxy`),
+  statsigProxyUrl: config.statsigProxyUrlOverride || (shouldUseProxy() ? '/api/v1/statsig-proxy' : `${getCloudflareApiBaseUrl(TrafficFlows.Gating)}/v1/statsig-proxy`),
 
   // Feature service URL's
-  unitagsApiUrl: config.unitagsApiUrlOverride || `${getCloudflareApiBaseUrl(TrafficFlows.Unitags)}/v2/unitags`,
+  unitagsApiUrl: config.unitagsApiUrlOverride || (shouldUseProxy() ? '/api/v2/unitags' : `${getCloudflareApiBaseUrl(TrafficFlows.Unitags)}/v2/unitags`),
   scantasticApiUrl:
-    config.scantasticApiUrlOverride || `${getCloudflareApiBaseUrl(TrafficFlows.Scantastic)}/v2/scantastic`,
-  forApiUrl: config.forApiUrlOverride || `${getCloudflareApiBaseUrl(TrafficFlows.FOR)}/v2/FOR.v1.FORService`,
-  tradingApiUrl: config.tradingApiUrlOverride || getCloudflareApiBaseUrl(TrafficFlows.TradingApi),
+    config.scantasticApiUrlOverride || (shouldUseProxy() ? '/api/v2/scantastic' : `${getCloudflareApiBaseUrl(TrafficFlows.Scantastic)}/v2/scantastic`),
+  forApiUrl: config.forApiUrlOverride || (shouldUseProxy() ? '/api/v2/FOR.v1.FORService' : `${getCloudflareApiBaseUrl(TrafficFlows.FOR)}/v2/FOR.v1.FORService`),
+  tradingApiUrl: config.tradingApiUrlOverride || (shouldUseProxy() ? '/api/v1/trading' : getCloudflareApiBaseUrl(TrafficFlows.TradingApi)),
   liquidityServiceUrl:
     config.liquidityServiceUrlOverride ||
     'https://liquidity.backend-prod.api.uniswap.org/uniswap.liquidity.v1.LiquidityService',
@@ -194,5 +298,5 @@ export const uniswapUrls = {
   walletFeedbackForm:
     'https://docs.google.com/forms/d/e/1FAIpQLSepzL5aMuSfRhSgw0zDw_gVmc2aeVevfrb1UbOwn6WGJ--46w/viewform',
 
-  dataApiServiceUrl: `${getCloudflareApiBaseUrl()}/v2/data.v1.DataApiService`,
+  dataApiServiceUrl: shouldUseProxy() ? '/api/v2/data.v1.DataApiService' : `${getCloudflareApiBaseUrl()}/v2/data.v1.DataApiService`,
 }
