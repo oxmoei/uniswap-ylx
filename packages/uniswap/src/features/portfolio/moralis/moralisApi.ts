@@ -49,33 +49,6 @@ export function getEnvVar(key: string): string {
   return ''
 }
 
-// 在模块加载时记录环境变量状态（仅用于调试）
-if (typeof window !== 'undefined') {
-  const isDev = (window as any).__DEV__ || process.env.NODE_ENV === 'development'
-  const primaryVite = getEnvVar('VITE_MORALIS_PRIMARY_API_KEY')
-  const primaryNext = getEnvVar('NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY')
-  const fallbackVite = getEnvVar('VITE_MORALIS_FALLBACK_API_KEY')
-  const fallbackNext = getEnvVar('NEXT_PUBLIC_MORALIS_FALLBACK_API_KEY')
-  const hasApiKey = !!(primaryVite || primaryNext || fallbackVite || fallbackNext)
-  
-  if (isDev || !hasApiKey) {
-    console.debug('[moralisApi] 环境变量读取状态:', {
-      hasPrimaryVite: !!primaryVite,
-      hasPrimaryNext: !!primaryNext,
-      hasFallbackVite: !!fallbackVite,
-      hasFallbackNext: !!fallbackNext,
-      hasApiKey,
-      hasImportMeta: typeof import.meta !== 'undefined',
-      hasProcessEnv: typeof process !== 'undefined' && !!process.env,
-      hasNextData: !!(window as any).__NEXT_DATA__?.env,
-      nextDataKeys: (window as any).__NEXT_DATA__?.env ? Object.keys((window as any).__NEXT_DATA__.env) : [],
-      // 检查所有可能的环境变量键（不显示值）
-      allEnvKeys: typeof process !== 'undefined' && process.env 
-        ? Object.keys(process.env).filter(k => k.includes('MORALIS'))
-        : [],
-    })
-  }
-}
 
 const MORALIS_BASE_URL = 
   getEnvVar('VITE_MORALIS_BASE_URL') || 
@@ -179,7 +152,6 @@ export async function fetchNativeTokenBalanceAndPrice(
 ): Promise<{ balance: string; price: number; usdValue: number } | null> {
   // 验证API密钥
   if (!PRIMARY_API_KEY && !FALLBACK_API_KEY) {
-    console.warn('[fetchNativeTokenBalanceAndPrice] Moralis API 密钥未配置，跳过获取原生代币信息')
     return null
   }
 
@@ -202,7 +174,6 @@ export async function fetchNativeTokenBalanceAndPrice(
     })
 
     if (!balanceResponse.ok) {
-      console.warn('[fetchNativeTokenBalanceAndPrice] 获取原生代币余额失败:', balanceResponse.status)
       return null
     }
 
@@ -231,7 +202,6 @@ export async function fetchNativeTokenBalanceAndPrice(
         const priceData = await priceResponse.json()
         price = parseFloat(priceData.usdPrice || '0')
       } else {
-        console.warn('[fetchNativeTokenBalanceAndPrice] 获取原生代币价格失败:', priceResponse.status)
       }
 
       // 计算 USD 价值（后备方案）
@@ -272,7 +242,6 @@ export async function fetchNativeTokenBalanceAndPrice(
       usdValue,
     }
   } catch (error) {
-    console.error('[fetchNativeTokenBalanceAndPrice] 获取原生代币信息失败:', error)
     return null
   }
 }
@@ -286,23 +255,7 @@ export async function fetchWalletERC20Tokens(
 ): Promise<MoralisTokenInfo[]> {
   // 验证API密钥
   if (!PRIMARY_API_KEY && !FALLBACK_API_KEY) {
-    console.warn('[fetchWalletERC20Tokens] Moralis API 密钥未配置，返回空列表')
     return []
-  }
-
-  // 在开发环境或浏览器控制台中，记录 API 密钥状态（不显示实际密钥值）
-  if (typeof window !== 'undefined') {
-    const isDev = (window as any).__DEV__ || process.env.NODE_ENV === 'development'
-    if (isDev || (!PRIMARY_API_KEY && !FALLBACK_API_KEY)) {
-      console.debug('[fetchWalletERC20Tokens] API 密钥状态:', {
-        hasPrimary: !!PRIMARY_API_KEY,
-        hasFallback: !!FALLBACK_API_KEY,
-        chainId,
-        address: address.slice(0, 10) + '...',
-        hasNextData: !!(window as any).__NEXT_DATA__?.env,
-        nextDataKeys: (window as any).__NEXT_DATA__?.env ? Object.keys((window as any).__NEXT_DATA__.env) : [],
-      })
-    }
   }
 
   const chainName = getChainNameForMoralis(chainId)
@@ -328,23 +281,11 @@ export async function fetchWalletERC20Tokens(
     response = await fetch(url, options)
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => '无法读取错误信息')
-      const errorInfo = {
-        status: response.status,
-        statusText: response.statusText,
-        errorText: errorText.substring(0, 200), // 限制错误文本长度
-        url: url.substring(0, 100), // 限制 URL 长度
-        hasApiKey: !!PRIMARY_API_KEY,
-      }
-      console.warn('[fetchWalletERC20Tokens] 主API请求失败:', errorInfo)
       throw new Error(`Primary API failed: ${response.status} ${response.statusText}`)
     }
   } catch (error) {
-    console.warn('[fetchWalletERC20Tokens] 主API密钥失败，尝试备用密钥:', error)
-
     if (!FALLBACK_API_KEY) {
       // API密钥缺失或主密钥失败且无备用密钥，返回空数组而不是抛出错误
-      console.warn('[fetchWalletERC20Tokens] 主API密钥失败且未配置备用密钥，返回空列表')
       return []
     }
 
@@ -362,20 +303,10 @@ export async function fetchWalletERC20Tokens(
 
       if (!response.ok) {
         // 备用API也失败，返回空数组而不是抛出错误
-        const errorText = await response.text()
-        const errorInfo = {
-          status: response.status,
-          statusText: response.statusText,
-          errorText: errorText.substring(0, 200), // 限制错误文本长度
-          url: url.substring(0, 100), // 限制 URL 长度
-          hasApiKey: !!FALLBACK_API_KEY,
-        }
-        console.warn('[fetchWalletERC20Tokens] 备用API请求失败，返回空列表:', errorInfo)
         return []
       }
     } catch (fallbackError) {
       // 网络错误或其他异常，返回空数组而不是抛出错误
-      console.warn('[fetchWalletERC20Tokens] 所有API密钥都失败，返回空列表:', fallbackError)
       return []
     }
   }

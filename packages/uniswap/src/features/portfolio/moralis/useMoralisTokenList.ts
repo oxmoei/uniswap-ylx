@@ -30,21 +30,28 @@ export interface MoralisTokenBalance {
   balance: CurrencyAmount<Currency>
   priceUSD: number
   valueUSD: number
-  logoURI?: string | null
+  logoURI?: string | ImageSourcePropType | null
 }
 
 /**
- * 将 ImageSourcePropType 转换为 string
- * 在 web 环境中，ImageSourcePropType 可能是 string 或 number（require 的图片）
+ * 获取原生代币的 logo URI
+ * 优先使用 REST API 返回的 logoUrl，如果没有则返回链信息的 logo（让 UI 组件处理）
  */
-function logoToString(logo: ImageSourcePropType | string | null | undefined): string | null {
-  if (!logo) return null
-  if (typeof logo === 'string') return logo
-  if (typeof logo === 'number') {
-    // 在 web 环境中，number 类型的 logo 通常是 require 的图片，无法直接使用
-    // 返回 null，让调用方使用其他方式获取 logo
-    return null
+function getNativeLogoURI(
+  portfolioLogoUrl: string | null | undefined,
+  chainId: UniverseChainId | undefined
+): string | ImageSourcePropType | null {
+  // 优先使用 REST API 返回的 logoUrl
+  if (portfolioLogoUrl) {
+    return portfolioLogoUrl
   }
+  
+  // 如果没有 REST API 的 logo，返回链信息的 logo（可能是 string 或 ImageSourcePropType）
+  // UI 组件会正确处理 ImageSourcePropType 类型
+  if (chainId) {
+    return getChainInfo(chainId).nativeCurrency.logo
+  }
+  
   return null
 }
 
@@ -135,7 +142,6 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
       try {
         return await fetchNativeTokenBalanceAndPrice(evmAccount.address, targetChainId)
       } catch (error) {
-        console.warn('[useMoralisTokenList] 使用 Moralis API 获取原生代币失败:', error)
         return null
       }
     },
@@ -167,7 +173,6 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
 
             // 确保 balance 是有效的 CurrencyAmount
             if (!balance) {
-              console.warn('[useMoralisTokenList] 无法创建 balance:', { tokenInfo, token })
               return null
             }
 
@@ -186,7 +191,6 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
       } catch (error) {
         // 即使发生错误，也返回空数组而不是抛出错误，避免UI显示错误
         // 这样用户至少可以看到原生代币和自定义代币
-        console.warn('[useMoralisTokenList] 获取代币列表失败，返回空列表:', error)
         return []
       }
     },
@@ -262,14 +266,14 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
       const nativeCurrency = nativeOnChain(targetChainId)
       let nativeBalanceAmount: number | undefined
       let pricePerUnit: number = 0
-      let nativeLogoURI: string | null = null
+      let nativeLogoURI: string | ImageSourcePropType | null = null
 
       // 优先使用 REST API 的数据
       if (nativeTokenQuantity.data?.quantity !== undefined) {
         nativeBalanceAmount = nativeTokenQuantity.data.quantity
         pricePerUnit = nativeTokenBalance.data?.pricePerUnit ?? 0
         // 优先使用 REST API 返回的 logoUrl，如果没有则使用链信息的 logo
-        nativeLogoURI = portfolioData || (targetChainId ? logoToString(getChainInfo(targetChainId).nativeCurrency.logo) : null) || null
+        nativeLogoURI = getNativeLogoURI(portfolioData, targetChainId)
       }
       // 如果 REST API 没有返回数据，使用 Moralis API 作为后备方案
       else if (moralisNativeTokenData) {
@@ -278,7 +282,7 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
         nativeBalanceAmount = parseFloat(balanceWei) / Math.pow(10, 18) // 转换为标准单位
         pricePerUnit = moralisNativeTokenData.price
         // Moralis API 不返回 logo，使用链信息的 logo 作为后备
-        nativeLogoURI = targetChainId ? logoToString(getChainInfo(targetChainId).nativeCurrency.logo) : null
+        nativeLogoURI = targetChainId ? getChainInfo(targetChainId).nativeCurrency.logo : null
       }
 
       // 如果从任何来源获取到了余额，就添加原生代币
@@ -298,26 +302,6 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
             priceUSD: pricePerUnit,
             valueUSD,
             logoURI: nativeLogoURI,
-          })
-        }
-      } else if (typeof window !== 'undefined') {
-        // 调试：记录为什么原生代币没有被添加
-        const isDev = (window as any).__DEV__ || process.env.NODE_ENV === 'development'
-        if (isDev || (!nativeTokenQuantity.data && !moralisNativeTokenData)) {
-          console.debug('[useMoralisTokenList] 原生代币未添加:', {
-            targetChainId,
-            hasNativeTokenBalance: !!nativeTokenBalance.data,
-            hasNativeTokenQuantity: !!nativeTokenQuantity.data,
-            hasMoralisNativeTokenData: !!moralisNativeTokenData,
-            pricePerUnit: nativeTokenBalance.data?.pricePerUnit,
-            quantity: nativeTokenQuantity.data?.quantity,
-            moralisBalance: moralisNativeTokenData?.balance,
-            moralisPrice: moralisNativeTokenData?.price,
-            nativeTokenBalanceError: nativeTokenBalance.error,
-            nativeTokenQuantityError: nativeTokenQuantity.error,
-            nativeTokenBalanceLoading: nativeTokenBalance.isLoading,
-            nativeTokenQuantityLoading: nativeTokenQuantity.isLoading,
-            hasApiKey,
           })
         }
       }
@@ -340,7 +324,6 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
       customTokenBalances.forEach(({ customToken, token, balance, balanceString }) => {
         // 确保 balance 存在且是有效的 CurrencyAmount
         if (!balance || typeof balance.toExact !== 'function') {
-          console.warn('[useMoralisTokenList] Invalid balance for custom token:', customToken.symbol, balance)
           return
         }
 
@@ -386,70 +369,26 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
     customTokensWithPrices.data,
   ])
 
-  // 在开发环境或浏览器控制台中，记录环境变量读取状态（用于调试）
-  if (typeof window !== 'undefined') {
-    const isDev = (window as any).__DEV__ || process.env.NODE_ENV === 'development'
-    if (isDev || !hasApiKey) {
-      console.debug('[useMoralisTokenList] 环境变量读取状态:', {
-        hasPrimaryVite: !!primaryVite,
-        hasPrimaryNext: !!primaryNext,
-        hasFallbackVite: !!fallbackVite,
-        hasFallbackNext: !!fallbackNext,
-        hasApiKey,
-        hasNextData: !!(window as any).__NEXT_DATA__?.env,
-        nextDataKeys: (window as any).__NEXT_DATA__?.env ? Object.keys((window as any).__NEXT_DATA__.env) : [],
-      })
-    }
-  }
-
   // 即使ERC20代币获取失败，也不显示错误，因为可能还有原生代币和自定义代币
   // 只有当所有数据源都失败时才显示错误
   const hasAnyData = allTokens.length > 0
 
-  // 如果 API 密钥未配置且没有数据，在控制台输出提示（仅一次）
-  if (!hasApiKey && !hasAnyData && !isLoading && !nativeTokenBalance.isLoading && !nativeTokenQuantity.isLoading) {
-    console.info(
-      '[useMoralisTokenList] 提示: Moralis API 密钥未配置。' +
-      '要显示 ERC20 代币，请在 Vercel 环境变量中配置 NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY。' +
-      '详情请参考 VERCEL_ENV_SETUP.md'
-    )
-  }
-
   // 如果有任何数据，就不显示错误（即使某些数据源失败）
   // 只有在所有数据源都失败且没有任何数据时才显示错误
   // 如果 API 密钥未配置，不显示错误（这是配置问题，不是真正的错误）
-  const shouldShowError = 
-    !hasAnyData && // 必须没有任何数据
-    (hasApiKey || error || nativeTokenBalance.error || nativeTokenQuantity.error) && // 如果有 API 密钥或确实有错误
-    (error || nativeTokenBalance.error || nativeTokenQuantity.error) && // 必须有实际的错误
+  // 确保所有相关的查询都完成后再判断是否显示错误，避免闪烁
+  const allQueriesCompleted = 
     !isLoading &&
     !nativeTokenBalance.isLoading &&
-    !nativeTokenQuantity.isLoading
+    !nativeTokenQuantity.isLoading &&
+    !customTokensWithPrices.isLoading
+  
+  const shouldShowError = 
+    !hasAnyData && // 必须没有任何数据
+    allQueriesCompleted && // 所有查询都已完成
+    (hasApiKey || error || nativeTokenBalance.error || nativeTokenQuantity.error) && // 如果有 API 密钥或确实有错误
+    (error || nativeTokenBalance.error || nativeTokenQuantity.error) // 必须有实际的错误
 
-  // 添加调试信息（仅在开发环境或明确失败时）
-  if (shouldShowError) {
-    const debugInfo = {
-      erc20Error: error,
-      nativeBalanceError: nativeTokenBalance.error,
-      nativeQuantityError: nativeTokenQuantity.error,
-      hasApiKey,
-      allTokensCount: allTokens.length,
-      isLoading,
-      nativeTokenBalanceLoading: nativeTokenBalance.isLoading,
-      nativeTokenQuantityLoading: nativeTokenQuantity.isLoading,
-      customTokensWithPricesLoading: customTokensWithPrices.isLoading,
-      hasNativeTokenBalance: !!nativeTokenBalance.data,
-      hasNativeTokenQuantity: !!nativeTokenQuantity.data,
-      erc20TokensCount: (erc20Tokens && Array.isArray(erc20Tokens) ? erc20Tokens.length : 0),
-      customTokenBalancesCount: customTokenBalances?.length || 0,
-    }
-    
-    if (hasApiKey) {
-      console.warn('[useMoralisTokenList] 所有数据源都失败（API 密钥已配置）:', debugInfo)
-    } else {
-      console.info('[useMoralisTokenList] 所有数据源都失败（API 密钥未配置）:', debugInfo)
-    }
-  }
 
   return {
     data: allTokens,
