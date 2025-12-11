@@ -33,43 +33,48 @@ export interface MoralisTokenBalance {
 }
 
 /**
- * 获取原生代币的 logo URI
- * 参考 tokenRankingsStatToCurrencyInfo 的方式，优先使用 REST API 返回的 logoUrl
- * 如果没有，则从 Uniswap Assets 仓库获取（使用 wrapped 地址）
- * 注意：TokenLogo 组件期望 url 是 string | null
+ * Get native token logo URI
+ * Reference: tokenRankingsStatToCurrencyInfo directly uses API's logo field
+ * Fallback strategy:
+ * 1. Use REST API's logoUrl if available (string)
+ * 2. Construct URL from Uniswap Assets repository using wrapped address (same as getTokenLogoURI)
+ * Note: TokenLogo component expects url to be string | null
  */
 function getNativeLogoURI(
   portfolioLogoUrl: string | null | undefined,
   chainId: UniverseChainId | undefined
 ): string | null {
-  // 优先使用 REST API 返回的 logoUrl（必须是 string）
+  // Priority 1: Use REST API's logoUrl if available (must be string)
   if (portfolioLogoUrl && typeof portfolioLogoUrl === 'string') {
     return portfolioLogoUrl
   }
   
-  // 如果没有 REST API 的 logo，从 Uniswap Assets 仓库获取
-  // 参考 getTokenLogoURI 的实现方式，使用原生代币的 wrapped 地址
-  if (chainId) {
-    try {
-      const chainInfo = getChainInfo(chainId)
-      const networkName = chainInfo.assetRepoNetworkName
-      
-      if (networkName) {
-        // 获取原生代币的 wrapped 地址
-        const nativeCurrency = nativeOnChain(chainId)
-        const wrappedAddress = nativeCurrency.wrapped.address
-        
-        // 构建 Uniswap Assets 仓库的 logo URL
-        // 格式与 getTokenLogoURI 相同：https://raw.githubusercontent.com/Uniswap/assets/master/blockchains/{networkName}/assets/{address}/logo.png
-        return `https://raw.githubusercontent.com/Uniswap/assets/master/blockchains/${networkName}/assets/${wrappedAddress}/logo.png`
-      }
-    } catch (error) {
-      // 如果获取失败，返回 null，让 TokenLogo 组件使用默认 fallback
-    }
+  if (!chainId) {
+    return null
   }
   
-  // 如果所有方式都失败，返回 null
-  // TokenLogo 组件会使用默认的 fallback（显示代币符号的前3个字符）
+  try {
+    const chainInfo = getChainInfo(chainId)
+    
+    // Priority 2: Construct URL from Uniswap Assets repository using wrapped address
+    // Reference: getTokenLogoURI in routing.ts constructs URLs this way
+    const networkName = chainInfo.assetRepoNetworkName
+    
+    if (networkName) {
+      // Get native token's wrapped address
+      const nativeCurrency = nativeOnChain(chainId)
+      const wrappedAddress = nativeCurrency.wrapped.address
+      
+      // Construct Uniswap Assets repository logo URL
+      // Format same as getTokenLogoURI: https://raw.githubusercontent.com/Uniswap/assets/master/blockchains/{networkName}/assets/{address}/logo.png
+      return `https://raw.githubusercontent.com/Uniswap/assets/master/blockchains/${networkName}/assets/${wrappedAddress}/logo.png`
+    }
+  } catch (error) {
+    // If all methods fail, return null to let TokenLogo component use default fallback
+  }
+  
+  // If all methods fail, return null
+  // TokenLogo component will use default fallback (display first 3 characters of symbol)
   return null
 }
 
