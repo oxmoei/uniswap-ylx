@@ -34,33 +34,22 @@ function getEnvVar(key: string): string {
 
 /**
  * Check if we should use proxy (relative paths) instead of direct API calls
- * This is needed when the app is deployed on a different domain than expected
- * (e.g., www.www-uniswap.org instead of app.uniswap.org)
- * 
- * In production, we should always use proxy to avoid CORS issues and ensure
- * consistent API routing through Vercel rewrites.
+ * Simplified: Only use proxy if explicitly configured via environment variable
+ * Otherwise, use direct API URLs (which should work if API server supports CORS)
  */
 function shouldUseProxy(): boolean {
   if (typeof window === 'undefined') {
     return false
   }
   
-  // In development, only use proxy if explicitly configured
-  const currentOrigin = window.location.origin
-  const isDevelopment = currentOrigin.includes('localhost') || currentOrigin.includes('127.0.0.1')
-  
-  // In production (non-localhost), always use proxy to avoid CORS issues
-  // This ensures API requests go through Vercel rewrites configured in vercel.json
-  if (!isDevelopment) {
-    return true
-  }
-  
-  // In development, check environment variable to force proxy usage
+  // Only use proxy if explicitly configured via environment variable
   const forceProxy = getEnvVar('VITE_USE_API_PROXY') || getEnvVar('REACT_APP_USE_API_PROXY')
   if (forceProxy === 'true' || forceProxy === '1') {
     return true
   }
   
+  // Default: Don't use proxy, use direct API URLs
+  // This matches development environment behavior and should work if API supports CORS
   return false
 }
 
@@ -92,6 +81,7 @@ function getApiBaseUrl(): string {
 
 /**
  * Get API base URL V2 with proxy support
+ * Simplified: Use direct API URL by default, only use proxy if explicitly configured
  */
 function getApiBaseUrlV2(): string {
   const envOverride = 
@@ -105,13 +95,10 @@ function getApiBaseUrlV2(): string {
   
   // If we should use proxy, return relative path (will be proxied by Vercel)
   if (shouldUseProxy()) {
-    // Log in development to help debug proxy configuration
-    if (typeof window !== 'undefined' && (window.location.hostname.includes('localhost') || window.location.hostname.includes('127.0.0.1'))) {
-      console.log('[API Config] Using proxy for API V2:', '/api/v2')
-    }
     return '/api/v2'
   }
   
+  // Default: Use direct API URL (same as development)
   return `${getApiBaseUrl()}/v2`
 }
 
