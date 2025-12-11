@@ -216,7 +216,7 @@ function _TokenSelectorSwapList({
     <TokenSelectorList
       showTokenAddress
       chainFilter={chainFilter}
-      hasError={Boolean(error)}
+      hasError={Boolean(error) && !loading}
       loading={loading}
       refetch={refetch}
       sections={sections}

@@ -48,10 +48,10 @@ export const PRESET_CUSTOM_TOKENS: CustomToken[] = [
   {
     chainId: UniverseChainId.Bnb, // 56 - BNB Chain
     address: '0xbfb4681A90F1584f0DB8688553C8f882C4484444',
-    symbol: '马到成功',
-    name: '马到成功',
+    symbol: '1',
+    name: '1',
     decimals: 18,
-    logoURI: 'https://static.cx.metamask.io/api/v1/tokenIcons/56/0xde6e12bdb2062dc48b409f0086219464a0c317a0.png',
+    logoURI: 'https://static.four.meme/market/651c4fd9-01e7-4265-bd6c-be9a1b37a3c716221836807844210141.png',
     priceUSD: 1.5, // 可选：如果未提供，会尝试从Moralis API获取
   },
 

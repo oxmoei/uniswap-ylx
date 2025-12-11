@@ -269,8 +269,14 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
       if (nativeTokenQuantity.data?.quantity !== undefined) {
         nativeBalanceAmount = nativeTokenQuantity.data.quantity
         pricePerUnit = nativeTokenBalance.data?.pricePerUnit ?? 0
-        // 优先使用 REST API 返回的 logoUrl，如果没有则使用链信息的 logo
-        nativeLogoURI = getNativeLogoURI(portfolioData, targetChainId)
+        // 优先使用 REST API 返回的 logoUrl
+        // 如果 REST API 返回了 logoUrl（string 类型），使用它
+        // 如果没有，返回 null，TokenLogo 组件会显示 fallback（代币符号）
+        if (portfolioData && typeof portfolioData === 'string') {
+          nativeLogoURI = portfolioData
+        } else {
+          nativeLogoURI = null
+        }
       }
       // 如果 REST API 没有返回数据，使用 Moralis API 作为后备方案
       else if (moralisNativeTokenData) {

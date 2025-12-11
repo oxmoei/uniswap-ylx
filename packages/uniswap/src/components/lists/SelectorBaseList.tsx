@@ -84,7 +84,8 @@ function _SelectorBaseList<T extends OnchainItemListOption>({
     [],
   )
 
-  if (hasError) {
+  // 只有在非加载状态且有错误时才显示错误，避免闪烁
+  if (hasError && !loading) {
     return (
       <>
         <Flex grow justifyContent="center">

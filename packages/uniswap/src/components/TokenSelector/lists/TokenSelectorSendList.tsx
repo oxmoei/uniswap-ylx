@@ -93,7 +93,7 @@ function _TokenSelectorSendList({
       showTokenAddress
       chainFilter={chainFilter}
       emptyElement={emptyElement}
-      hasError={Boolean(error)}
+      hasError={Boolean(error) && !loading}
       loading={loading}
       refetch={refetch}
       sections={sections}
