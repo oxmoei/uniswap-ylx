@@ -34,8 +34,9 @@ export interface MoralisTokenBalance {
 
 /**
  * 获取原生代币的 logo URI
- * 优先使用 REST API 返回的 logoUrl，如果没有则返回 null（让 TokenLogo 组件使用默认 fallback）
- * 注意：TokenLogo 组件期望 url 是 string | null，不能传递 ImageSourcePropType
+ * 参考 tokenRankingsStatToCurrencyInfo 的方式，优先使用 REST API 返回的 logoUrl
+ * 如果没有，则从 Uniswap Assets 仓库获取（使用 wrapped 地址）
+ * 注意：TokenLogo 组件期望 url 是 string | null
  */
 function getNativeLogoURI(
   portfolioLogoUrl: string | null | undefined,
@@ -46,9 +47,29 @@ function getNativeLogoURI(
     return portfolioLogoUrl
   }
   
-  // 如果没有 REST API 的 logo，返回 null
+  // 如果没有 REST API 的 logo，从 Uniswap Assets 仓库获取
+  // 参考 getTokenLogoURI 的实现方式，使用原生代币的 wrapped 地址
+  if (chainId) {
+    try {
+      const chainInfo = getChainInfo(chainId)
+      const networkName = chainInfo.assetRepoNetworkName
+      
+      if (networkName) {
+        // 获取原生代币的 wrapped 地址
+        const nativeCurrency = nativeOnChain(chainId)
+        const wrappedAddress = nativeCurrency.wrapped.address
+        
+        // 构建 Uniswap Assets 仓库的 logo URL
+        // 格式与 getTokenLogoURI 相同：https://raw.githubusercontent.com/Uniswap/assets/master/blockchains/{networkName}/assets/{address}/logo.png
+        return `https://raw.githubusercontent.com/Uniswap/assets/master/blockchains/${networkName}/assets/${wrappedAddress}/logo.png`
+      }
+    } catch (error) {
+      // 如果获取失败，返回 null，让 TokenLogo 组件使用默认 fallback
+    }
+  }
+  
+  // 如果所有方式都失败，返回 null
   // TokenLogo 组件会使用默认的 fallback（显示代币符号的前3个字符）
-  // 这样在 web 环境中也能正常显示，不会因为 ImageSourcePropType 类型问题导致无法显示
   return null
 }
 
@@ -269,14 +290,10 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
       if (nativeTokenQuantity.data?.quantity !== undefined) {
         nativeBalanceAmount = nativeTokenQuantity.data.quantity
         pricePerUnit = nativeTokenBalance.data?.pricePerUnit ?? 0
-        // 优先使用 REST API 返回的 logoUrl
-        // 如果 REST API 返回了 logoUrl（string 类型），使用它
-        // 如果没有，返回 null，TokenLogo 组件会显示 fallback（代币符号）
-        if (portfolioData && typeof portfolioData === 'string') {
-          nativeLogoURI = portfolioData
-        } else {
-          nativeLogoURI = null
-        }
+        // 使用 getNativeLogoURI 获取 logo，它会：
+        // 1. 优先使用 REST API 返回的 logoUrl
+        // 2. 如果没有，从 Uniswap Assets 仓库获取（使用 wrapped 地址，参考 getTokenLogoURI 的实现）
+        nativeLogoURI = getNativeLogoURI(portfolioData, targetChainId)
       }
       // 如果 REST API 没有返回数据，使用 Moralis API 作为后备方案
       else if (moralisNativeTokenData) {
