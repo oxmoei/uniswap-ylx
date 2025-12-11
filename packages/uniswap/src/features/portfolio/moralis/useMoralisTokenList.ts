@@ -18,7 +18,7 @@ import { currencyIdToAddress, currencyIdToChain, isNativeCurrencyAddress } from 
 import { areAddressesEqual } from 'uniswap/src/utils/addresses'
 import { getCustomTokensByChain } from 'uniswap/src/features/tokens/customTokens'
 import { useCustomTokenBalances } from 'uniswap/src/features/tokens/useCustomTokenBalance'
-import { fetchTokenPrice, getChainNameForMoralis, fetchNativeTokenBalanceAndPrice, getEnvVar } from './moralisApi'
+import { fetchTokenPrice, getChainNameForMoralis, fetchNativeTokenBalanceAndPrice } from './moralisApi'
 
 /**
  * 使用Moralis API获取的代币余额信息
@@ -100,15 +100,14 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
     },
   })
 
-  // 使用 Moralis API 作为原生代币的后备方案（当 REST API 失败或没有返回数据时）
-  const hasApiKey = useMemo(() => {
-    const primaryVite = getEnvVar('VITE_MORALIS_PRIMARY_API_KEY')
-    const primaryNext = getEnvVar('NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY')
-    const fallbackVite = getEnvVar('VITE_MORALIS_FALLBACK_API_KEY')
-    const fallbackNext = getEnvVar('NEXT_PUBLIC_MORALIS_FALLBACK_API_KEY')
-    return !!(primaryVite || primaryNext || fallbackVite || fallbackNext)
-  }, [])
+  // 检查所有可能的环境变量键（提前定义，供后续使用）
+  const primaryVite = getEnvVar('VITE_MORALIS_PRIMARY_API_KEY')
+  const primaryNext = getEnvVar('NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY')
+  const fallbackVite = getEnvVar('VITE_MORALIS_FALLBACK_API_KEY')
+  const fallbackNext = getEnvVar('NEXT_PUBLIC_MORALIS_FALLBACK_API_KEY')
+  const hasApiKey = !!(primaryVite || primaryNext || fallbackVite || fallbackNext)
 
+  // 使用 Moralis API 作为原生代币的后备方案（当 REST API 失败或没有返回数据时）
   const { data: moralisNativeTokenData } = useQuery({
     queryKey: ['moralis-native-token', evmAccount?.address, targetChainId],
     queryFn: async () => {
@@ -368,14 +367,6 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
     customTokensWithPrices.data,
   ])
 
-  // 检查所有可能的环境变量键
-  const primaryVite = getEnvVar('VITE_MORALIS_PRIMARY_API_KEY')
-  const primaryNext = getEnvVar('NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY')
-  const fallbackVite = getEnvVar('VITE_MORALIS_FALLBACK_API_KEY')
-  const fallbackNext = getEnvVar('NEXT_PUBLIC_MORALIS_FALLBACK_API_KEY')
-  
-  const hasApiKey = !!(primaryVite || primaryNext || fallbackVite || fallbackNext)
-  
   // 在开发环境或浏览器控制台中，记录环境变量读取状态（用于调试）
   if (typeof window !== 'undefined') {
     const isDev = (window as any).__DEV__ || process.env.NODE_ENV === 'development'
