@@ -122,6 +122,14 @@ export default defineConfig(({ mode }) => {
     Object.entries(env).map(([key, value]) => [`process.env.${key}`, JSON.stringify(value)]),
   )
 
+  // Also inject environment variables into import.meta.env
+  // This ensures that both VITE_ and NEXT_PUBLIC_ prefixed variables are available
+  // Vite automatically handles VITE_ prefixed variables, but we need to manually
+  // inject NEXT_PUBLIC_ and other prefixed variables for compatibility
+  const importMetaEnvDefines = Object.fromEntries(
+    Object.entries(env).map(([key, value]) => [`import.meta.env.${key}`, JSON.stringify(value)]),
+  )
+
   return {
     root,
 
@@ -134,6 +142,7 @@ export default defineConfig(({ mode }) => {
       'process.env.REACT_APP_WEB_BUILD_TYPE': JSON.stringify('vite'),
       'process.env.TAMAGUI_STACK_Z_INDEX_GLOBAL': JSON.stringify('true'),
       ...envDefines,
+      ...importMetaEnvDefines,
     },
 
     resolve: {

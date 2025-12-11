@@ -78,8 +78,8 @@
 
 - **Next.js 格式（备选）**：`NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY`
   - 代码也支持此格式（为了兼容性）
-  - 但 Vite 可能不会自动处理此格式，除非在 `vite.config.mts` 中配置了 `envPrefix: []`
-  - 项目已配置 `envPrefix: []`，所以此格式也能工作，但建议使用 `VITE_` 前缀
+  - 项目已配置 `envPrefix: []`，并且 `vite.config.mts` 会将所有环境变量注入到 `import.meta.env` 和 `process.env`
+  - 因此，`NEXT_PUBLIC_` 前缀的变量也能正常工作，但建议使用 `VITE_` 前缀以保持一致性
 
 **为什么本地开发正常，但部署后不行？**
 
@@ -88,9 +88,14 @@
 2. 但在 Vercel 中只配置了 `NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY`
 3. 虽然代码支持 `NEXT_PUBLIC_` 前缀，但在某些情况下可能无法正确读取
 
+**已修复**：
+- 已更新 `vite.config.mts`，确保所有环境变量（包括 `NEXT_PUBLIC_` 前缀的）都会被注入到 `import.meta.env` 和 `process.env`
+- 现在两种格式都能正常工作，但建议使用 `VITE_` 前缀以保持一致性
+
 **解决方案**：
-- 在 Vercel 中配置 `VITE_MORALIS_PRIMARY_API_KEY`（而不是 `NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY`）
-- 或者同时配置两种格式，确保兼容性
+- 在 Vercel 中配置 `VITE_MORALIS_PRIMARY_API_KEY`（推荐）
+- 或者配置 `NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY`（也支持，但需要重新部署才能生效）
+- 或者同时配置两种格式，确保最大兼容性
 
 ### 5. 验证配置
 
