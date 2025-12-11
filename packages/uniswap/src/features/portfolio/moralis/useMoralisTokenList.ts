@@ -337,7 +337,7 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
       tokens.push(...erc20Tokens)
     }
 
-    // 添加自定义代币（如果有余额）
+    // 添加自定义代币（只显示余额大于0的代币）
     if (customTokenBalances && customTokenBalances.length > 0) {
       const priceMap = new Map(
         (customTokensWithPrices.data || []).map((item) => [
@@ -353,6 +353,12 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
         }
 
         const balanceNum = parseFloat(balanceString)
+        
+        // 只显示余额大于0的自定义代币
+        if (balanceNum <= 0) {
+          return
+        }
+
         const priceUSD = priceMap.get(`${customToken.chainId}-${customToken.address}`) || customToken.priceUSD || 0
         const valueUSD = balanceNum * priceUSD
 
