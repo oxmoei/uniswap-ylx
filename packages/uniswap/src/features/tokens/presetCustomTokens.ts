@@ -47,12 +47,12 @@ export const PRESET_CUSTOM_TOKENS: CustomToken[] = [
   // 示例1：BNB Chain上的代币
   {
     chainId: UniverseChainId.Bnb, // 56 - BNB Chain
-    address: '0xbfb4681A90F1584f0DB8688553C8f882C4484444',
-    symbol: '马到成功',
-    name: '马到成功',
+    address: '0x5bee1b15970790cb8d044ce05be5851481584444',
+    symbol: '金蟾蟾',
+    name: '金蟾蟾',
     decimals: 18,
-    logoURI: 'https://static.four.meme/market/651c4fd9-01e7-4265-bd6c-be9a1b37a3c716221836807844210141.png',
-    priceUSD: 1.5, // 可选：如果未提供，会尝试从Moralis API获取
+    logoURI: 'https://four.meme/_next/image?url=https%3A%2F%2Fstatic.four.meme%2Fmarket%2F4e57f536-2ec7-41a5-9a39-f3158f9edd896534373108249292059.jpeg&w=64&q=75',
+    priceUSD: 0.000000041, // 可选：如果未提供，会尝试从Moralis API获取
   },
 
   // 示例2：Ethereum主网上的代币（注释掉的示例）

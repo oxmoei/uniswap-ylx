@@ -21,59 +21,10 @@ interface SessionTransportOptions {
 function createTransport(ctx: SessionTransportOptions): ReturnType<typeof createConnectTransport> {
   const { getSessionId, getDeviceId, getBaseUrl, getHeaders, options } = ctx
 
-  // Get initial baseUrl for ConnectRPC (required at creation time)
-  // We'll override it dynamically in the interceptor to ensure proxy detection works at runtime
-  const initialBaseUrl = getBaseUrl()
-
   const transportOptions: ConnectTransportOptions = {
-    // Use a placeholder that will be overridden in the interceptor
-    // ConnectRPC requires a valid URL at creation time, so we use current origin or a fallback
-    baseUrl: typeof window !== 'undefined' ? window.location.origin : 'https://app.uniswap.org',
+    baseUrl: getBaseUrl(),
     interceptors: [
       (next) => async (request) => {
-        // Dynamically get the current baseUrl at request time
-        // This ensures proxy detection works correctly even if window was not available at module load time
-        const currentBaseUrl = getBaseUrl()
-        
-        // Override the request URL to use the current baseUrl
-        if (request.url) {
-          try {
-            const requestUrl = new URL(request.url)
-            const servicePath = requestUrl.pathname + requestUrl.search
-            
-            // If currentBaseUrl is a relative path, prepend current origin
-            if (currentBaseUrl.startsWith('/')) {
-              const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://app.uniswap.org'
-              // ConnectRPC appends service path to baseUrl, so we need to extract just the service path
-              // The service path typically starts after the baseUrl
-              // If the path already includes the baseUrl, use it as-is; otherwise, prepend baseUrl
-              if (servicePath.startsWith(currentBaseUrl)) {
-                request.url = currentOrigin + servicePath
-              } else {
-                // Extract service path (remove the placeholder base if present)
-                const cleanPath = servicePath.replace(/^\/[^/]+/, '')
-                request.url = currentOrigin + currentBaseUrl + cleanPath
-              }
-            } else {
-              // Absolute URL - use it directly
-              const baseUrlObj = new URL(currentBaseUrl)
-              // Extract service path and append to new baseUrl
-              const cleanPath = servicePath.replace(/^\/[^/]+/, '')
-              request.url = baseUrlObj.origin + baseUrlObj.pathname + cleanPath
-            }
-          } catch (error) {
-            // If URL parsing fails, try simpler replacement
-            if (typeof window !== 'undefined' && currentBaseUrl.startsWith('/')) {
-              const currentOrigin = window.location.origin
-              // Try to extract service path from request URL
-              const match = request.url.match(/\/([^/]+\/[^?]+)(\?.*)?$/)
-              if (match) {
-                request.url = currentOrigin + currentBaseUrl + '/' + match[1] + (match[2] || '')
-              }
-            }
-          }
-        }
-
         // Add session ID header for mobile/extension
         // Web uses cookies automatically
         if (!isWebApp) {

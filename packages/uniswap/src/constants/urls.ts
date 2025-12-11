@@ -8,7 +8,9 @@ import { isDevEnv, isPlaywrightEnv } from 'utilities/src/environment/env'
 function getEnvVar(key: string): string {
   // Try Vite format (import.meta.env)
   try {
+    // @ts-expect-error - import.meta.env is available in Vite runtime
     if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+      // @ts-expect-error - import.meta.env is available in Vite runtime
       const viteEnv = (import.meta as any).env
       if (viteEnv[key]) {
         return viteEnv[key] as string
@@ -35,7 +37,7 @@ function getEnvVar(key: string): string {
  * This is needed when the app is deployed on a different domain than expected
  * (e.g., www.www-uniswap.org instead of app.uniswap.org)
  */
-export function shouldUseProxy(): boolean {
+function shouldUseProxy(): boolean {
   if (typeof window === 'undefined') {
     return false
   }
@@ -85,9 +87,8 @@ function getApiBaseUrl(): string {
 
 /**
  * Get API base URL V2 with proxy support
- * This function is called at runtime to ensure proxy detection works correctly
  */
-export function getApiBaseUrlV2(): string {
+function getApiBaseUrlV2(): string {
   const envOverride = 
     getEnvVar('VITE_API_BASE_URL_V2') || 
     getEnvVar('REACT_APP_API_BASE_URL_V2') || 

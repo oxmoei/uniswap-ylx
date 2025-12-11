@@ -1,23 +1,13 @@
 import { Transport } from '@connectrpc/connect'
 import { ConnectTransportOptions } from '@connectrpc/connect-web'
 import { getTransport } from '@universe/api'
-import { getApiBaseUrlV2 } from 'uniswap/src/constants/urls'
+import { uniswapUrls } from 'uniswap/src/constants/urls'
 import { BASE_UNISWAP_HEADERS } from 'uniswap/src/data/apiClients/createUniswapFetchClient'
 import { isMobileApp } from 'utilities/src/platform'
 
-// Helper function to get API base URL dynamically at runtime
-// This ensures proxy detection works correctly even if window is not available at module load time
-// We call getApiBaseUrlV2() at runtime instead of using the pre-computed uniswapUrls.apiBaseUrlV2
-function getDynamicApiBaseUrlV2(): string {
-  // Call getApiBaseUrlV2() at runtime to ensure proxy detection works correctly
-  // This is important because shouldUseProxy() checks window.location.origin,
-  // which may not be available at module load time
-  return getApiBaseUrlV2()
-}
-
 export const createConnectTransportWithDefaults = (options: Partial<ConnectTransportOptions> = {}): Transport =>
   getTransport({
-    getBaseUrl: getDynamicApiBaseUrlV2,
+    getBaseUrl: () => uniswapUrls.apiBaseUrlV2,
     getHeaders: () => (isMobileApp ? BASE_UNISWAP_HEADERS : {}),
     options,
   })
