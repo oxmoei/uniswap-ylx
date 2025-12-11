@@ -325,6 +325,13 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
     } catch {
       // import.meta not available, fall through to process.env
     }
+    // 在浏览器环境中，process.env 可能不可用，尝试从 window 对象读取（Next.js 会注入）
+    if (typeof window !== 'undefined' && (window as any).__NEXT_DATA__?.env) {
+      const nextEnv = (window as any).__NEXT_DATA__.env
+      if (nextEnv[key]) {
+        return nextEnv[key]
+      }
+    }
     return process.env[key] || ''
   }
   const hasApiKey = !!(
@@ -336,7 +343,6 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
 
   // 即使ERC20代币获取失败，也不显示错误，因为可能还有原生代币和自定义代币
   // 只有当所有数据源都失败时才显示错误
-  // 如果 API 密钥未配置，不显示错误（这是配置问题，不是真正的错误）
   const hasAnyData = allTokens.length > 0
 
   // 如果 API 密钥未配置且没有数据，在控制台输出提示（仅一次）
@@ -347,13 +353,28 @@ export function useMoralisTokenList(chainId?: UniverseChainId) {
       '详情请参考 VERCEL_ENV_SETUP.md'
     )
   }
+
+  // 如果有任何数据，就不显示错误（即使某些数据源失败）
+  // 只有在所有数据源都失败且没有任何数据时才显示错误
+  // 如果 API 密钥未配置，不显示错误（这是配置问题，不是真正的错误）
   const shouldShowError = 
-    !hasAnyData && 
-    hasApiKey && // 只有在 API 密钥已配置时才显示错误
-    (error || nativeTokenBalance.error || nativeTokenQuantity.error) &&
+    !hasAnyData && // 必须没有任何数据
+    (hasApiKey || error || nativeTokenBalance.error || nativeTokenQuantity.error) && // 如果有 API 密钥或确实有错误
+    (error || nativeTokenBalance.error || nativeTokenQuantity.error) && // 必须有实际的错误
     !isLoading &&
     !nativeTokenBalance.isLoading &&
     !nativeTokenQuantity.isLoading
+
+  // 添加调试信息（仅在开发环境或明确失败时）
+  if (shouldShowError && hasApiKey) {
+    console.warn('[useMoralisTokenList] 所有数据源都失败:', {
+      erc20Error: error,
+      nativeBalanceError: nativeTokenBalance.error,
+      nativeQuantityError: nativeTokenQuantity.error,
+      hasApiKey,
+      allTokensCount: allTokens.length,
+    })
+  }
 
   return {
     data: allTokens,

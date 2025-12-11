@@ -69,12 +69,26 @@ function useTokenSectionsForSwap({
 
   const recentlySearchedTokenOptions = useRecentlySearchedTokens(chainFilter)
 
-  const error =
-    (!portfolioTokenOptions && portfolioTokenOptionsError) ||
-    (!trendingTokenOptions && trendingTokenOptionsError) ||
-    (!favoriteTokenOptions && favoriteTokenOptionsError) ||
-    (!commonTokenOptions && commonTokenOptionsError) ||
-    (!bridgingTokenOptions && bridgingTokenOptionsError)
+  // 检查是否有任何数据
+  const hasAnyData = 
+    (portfolioTokenOptions && portfolioTokenOptions.length > 0) ||
+    (trendingTokenOptions && trendingTokenOptions.length > 0) ||
+    (favoriteTokenOptions && favoriteTokenOptions.length > 0) ||
+    (commonTokenOptions && commonTokenOptions.length > 0) ||
+    (bridgingTokenOptions && bridgingTokenOptions.length > 0) ||
+    (recentlySearchedTokenOptions && recentlySearchedTokenOptions.length > 0)
+  
+  // 只有在没有任何数据且至少有一个数据源明确返回错误时才显示错误
+  // 如果某个数据源的 error 是 undefined，说明不应该显示错误（例如 API 密钥未配置的情况）
+  // 只有当所有数据源都失败且没有任何数据时才显示错误
+  const hasAnyError = 
+    portfolioTokenOptionsError ||
+    trendingTokenOptionsError ||
+    favoriteTokenOptionsError ||
+    commonTokenOptionsError ||
+    bridgingTokenOptionsError
+  
+  const error = !hasAnyData && hasAnyError ? hasAnyError : undefined
 
   const loading =
     (!portfolioTokenOptions && portfolioTokenOptionsLoading) ||

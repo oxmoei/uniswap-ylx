@@ -24,7 +24,9 @@ function useTokenSectionsForSend({
   } = usePortfolioTokenOptions({ evmAddress, svmAddress, chainFilter })
 
   const loading = portfolioTokenOptionsLoading
-  const error = !portfolioTokenOptions && portfolioTokenOptionsError
+  // 只有在明确返回错误时才显示错误（usePortfolioTokenOptions 已经处理了错误判断逻辑）
+  // 如果 portfolioTokenOptionsError 是 undefined，说明不应该显示错误
+  const error = portfolioTokenOptionsError
 
   const sections = useOnchainItemListSection({
     sectionKey: OnchainItemSectionName.YourTokens,

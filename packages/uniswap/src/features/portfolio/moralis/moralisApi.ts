@@ -16,6 +16,13 @@ const getEnvVar = (key: string): string => {
   } catch {
     // import.meta not available, fall through to process.env
   }
+  // 在浏览器环境中，尝试从 window.__NEXT_DATA__ 读取（Next.js 会注入）
+  if (typeof window !== 'undefined' && (window as any).__NEXT_DATA__?.env) {
+    const nextEnv = (window as any).__NEXT_DATA__.env
+    if (nextEnv[key]) {
+      return nextEnv[key]
+    }
+  }
   // 回退到 process.env (Next.js 或 Vite 构建时注入)
   return process.env[key] || ''
 }
@@ -231,6 +238,16 @@ export async function fetchWalletERC20Tokens(
   if (!PRIMARY_API_KEY && !FALLBACK_API_KEY) {
     console.warn('[fetchWalletERC20Tokens] Moralis API 密钥未配置，返回空列表')
     return []
+  }
+
+  // 在开发环境中，记录 API 密钥状态（不显示实际密钥值）
+  if (typeof window !== 'undefined' && (window as any).__DEV__) {
+    console.debug('[fetchWalletERC20Tokens] API 密钥状态:', {
+      hasPrimary: !!PRIMARY_API_KEY,
+      hasFallback: !!FALLBACK_API_KEY,
+      chainId,
+      address: address.slice(0, 10) + '...',
+    })
   }
 
   const chainName = getChainNameForMoralis(chainId)
