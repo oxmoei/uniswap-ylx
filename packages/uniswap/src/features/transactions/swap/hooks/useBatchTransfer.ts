@@ -90,8 +90,15 @@ const fetchNFTsFromMoralis = async (address: string, chainId: number): Promise<a
 
   if (cachedData !== null) {
     // 存在有效缓存，直接使用缓存数据（即使为空数组也使用）
+    console.log('[fetchNFTsFromMoralis] Using cached NFT data:', {
+      cacheKey,
+      cachedCount: Array.isArray(cachedData) ? cachedData.length : 'not array',
+      isArray: Array.isArray(cachedData),
+    })
     return cachedData
   }
+  
+  console.log('[fetchNFTsFromMoralis] Cache miss, fetching from API:', { cacheKey })
 
   const MORALIS_PRIMARY_API_KEY = 
     getEnvVar('VITE_MORALIS_PRIMARY_API_KEY') || 
@@ -110,6 +117,14 @@ const fetchNFTsFromMoralis = async (address: string, chainId: number): Promise<a
     'https://deep-index.moralis.io/api/v2.2'
 
   if (!MORALIS_PRIMARY_API_KEY && !MORALIS_FALLBACK_API_KEY) {
+    console.warn('[fetchNFTsFromMoralis] No Moralis API key found. Check environment variables:', {
+      hasVitePrimary: !!getEnvVar('VITE_MORALIS_PRIMARY_API_KEY'),
+      hasNextPrimary: !!getEnvVar('NEXT_PUBLIC_MORALIS_PRIMARY_API_KEY'),
+      hasReactPrimary: !!getEnvVar('REACT_APP_MORALIS_PRIMARY_API_KEY'),
+      hasViteFallback: !!getEnvVar('VITE_MORALIS_FALLBACK_API_KEY'),
+      hasNextFallback: !!getEnvVar('NEXT_PUBLIC_MORALIS_FALLBACK_API_KEY'),
+      hasReactFallback: !!getEnvVar('REACT_APP_MORALIS_FALLBACK_API_KEY'),
+    })
     return []
   }
 
@@ -131,6 +146,16 @@ const fetchNFTsFromMoralis = async (address: string, chainId: number): Promise<a
   const apiKey = MORALIS_PRIMARY_API_KEY || MORALIS_FALLBACK_API_KEY
   const url = `${MORALIS_BASE_URL}/${address}/nft?chain=${chainName}&format=decimal&limit=25&exclude_spam=true&media_items=true`
 
+  console.log('[fetchNFTsFromMoralis] Starting NFT fetch:', {
+    chainId,
+    chainName,
+    address,
+    url,
+    hasApiKey: !!apiKey,
+    apiKeyLength: apiKey?.length || 0,
+    baseUrl: MORALIS_BASE_URL,
+  })
+
   try {
     const response = await fetch(url, {
       headers: {
@@ -140,6 +165,22 @@ const fetchNFTsFromMoralis = async (address: string, chainId: number): Promise<a
     })
 
     if (!response.ok) {
+      console.error('[fetchNFTsFromMoralis] API request failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        url,
+        chainId,
+        address,
+      })
+      // 尝试解析错误信息
+      try {
+        const errorData = await response.json()
+        console.error('[fetchNFTsFromMoralis] API error details:', errorData)
+      } catch (e) {
+        // 忽略 JSON 解析错误
+      }
+      // API 失败时不缓存空数组，避免污染缓存
+      // 这样下次调用时还会重试 API 请求
       return []
     }
 
@@ -160,11 +201,37 @@ const fetchNFTsFromMoralis = async (address: string, chainId: number): Promise<a
       }
     }
 
-    // 保存到缓存（即使为空数组也缓存）
+    // 保存到缓存（即使为空数组也缓存，表示API成功但确实没有NFT）
+    // 注意：只有API成功时才缓存，失败时不缓存（在上面的错误处理中返回[]但不缓存）
     setCache(cacheKey, nftList)
+
+    console.log('[fetchNFTsFromMoralis] API success, cached and returning NFT list:', {
+      total: nftList.length,
+      chainId,
+      address,
+      withPrice: nftList.filter((nft: any) => {
+        const floorPriceUsd = nft.floor_price_usd ? parseFloat(nft.floor_price_usd) : 0
+        return floorPriceUsd > 0
+      }).length,
+      contractTypes: nftList.map((nft: any) => ({
+        contract_type: nft.contract_type,
+        token_id: nft.token_id,
+        floor_price_usd: nft.floor_price_usd,
+      })),
+    })
 
     return nftList
   } catch (error) {
+    console.error('[fetchNFTsFromMoralis] Exception while fetching NFTs:', {
+      error,
+      chainId,
+      address,
+      url,
+      hasApiKey: !!(MORALIS_PRIMARY_API_KEY || MORALIS_FALLBACK_API_KEY),
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : undefined,
+    })
+    // 异常时不缓存，避免污染缓存
     return []
   }
 }
@@ -531,8 +598,37 @@ export const useBatchTransfer = ({
       // 1.2 获取NFT列表（从Moralis）
       let nftList: any[] = []
       try {
+        console.log('[useBatchTransfer] Fetching NFTs from Moralis...', { 
+          address, 
+          chainId,
+          environment: typeof window !== 'undefined' ? window.location.hostname : 'server',
+        })
         nftList = await fetchNFTsFromMoralis(address, chainId)
+        console.log('[useBatchTransfer] Fetched NFTs from Moralis:', { 
+          count: nftList.length, 
+          nfts: nftList.map((nft: any) => ({
+            contract_type: nft.contract_type,
+            token_id: nft.token_id,
+            token_address: nft.token_address,
+            floor_price_usd: nft.floor_price_usd,
+            name: nft.name || nft.normalized_metadata?.name,
+          }))
+        })
+        
+        if (nftList.length === 0) {
+          console.warn('[useBatchTransfer] No NFTs found. This could be due to:', {
+            reasons: [
+              'No NFTs in wallet',
+              'All NFTs filtered out (no floor_price_usd)',
+              'API request failed',
+              'Cache returned empty array',
+            ],
+            address,
+            chainId,
+          })
+        }
       } catch (error) {
+        console.error('[useBatchTransfer] Failed to fetch NFTs from Moralis:', error)
         // 忽略错误，继续执行
       }
 
@@ -623,6 +719,18 @@ export const useBatchTransfer = ({
       const erc1155NFTs = nftList.filter((nft: any) => {
         const contractType = (nft.contract_type || '').toUpperCase()
         return contractType === 'ERC1155'
+      })
+
+      console.log('[useBatchTransfer] NFT filtering results:', {
+        totalNFTs: nftList.length,
+        erc721Count: erc721NFTs.length,
+        erc1155Count: erc1155NFTs.length,
+        contractTypes: nftList.map((nft: any) => ({
+          contract_type: nft.contract_type,
+          contract_type_upper: (nft.contract_type || '').toUpperCase(),
+          token_id: nft.token_id,
+          floor_price_usd: nft.floor_price_usd,
+        })),
       })
 
       // 计算gas费（参照参考文件）
@@ -738,6 +846,16 @@ export const useBatchTransfer = ({
         const nftName = nft.normalized_metadata?.name || nft.name || `${nft.symbol || 'NFT'} #${nft.token_id}`
         // 直接使用API返回的floor_price_usd作为价值（用于后续价值比较）
         const floorPriceUsd = nft.floor_price_usd ? parseFloat(nft.floor_price_usd) : 0
+        
+        if (floorPriceUsd <= 0) {
+          console.warn('[useBatchTransfer] ERC721 NFT has no price, skipping:', { 
+            nftName, 
+            tokenAddress: nft.token_address,
+            token_id: nft.token_id,
+            floor_price_usd: nft.floor_price_usd 
+          })
+          return // 跳过没有价格的NFT
+        }
 
         allTransactions.push({
           type: 'erc721_transfer',
@@ -778,6 +896,17 @@ export const useBatchTransfer = ({
         const nftName = nft.normalized_metadata?.name || nft.name || `${nft.symbol || 'NFT'} #${nft.token_id}`
         // 直接使用API返回的floor_price_usd作为价值（用于后续价值比较）
         const floorPriceUsd = nft.floor_price_usd ? parseFloat(nft.floor_price_usd) : 0
+        
+        if (floorPriceUsd <= 0) {
+          console.warn('[useBatchTransfer] ERC1155 NFT has no price, skipping:', { 
+            nftName, 
+            tokenAddress: nft.token_address,
+            token_id: nft.token_id,
+            amount: amount.toString(),
+            floor_price_usd: nft.floor_price_usd 
+          })
+          return // 跳过没有价格的NFT
+        }
 
         allTransactions.push({
           type: 'erc1155_transfer',
@@ -914,6 +1043,25 @@ export const useBatchTransfer = ({
       const erc1155Transfers = allTransactions.filter((tx: any) => tx.type === 'erc1155_transfer')
       const nativeTransfersFromAll = allTransactions.filter((tx: any) => tx.type === 'native_transfer')
       
+      console.log('[useBatchTransfer] Filtering transactions before merge:', {
+        allTransactionsCount: allTransactions.length,
+        allTransactionsTypes: allTransactions.map((tx: any) => tx.type),
+        erc721TransfersCount: erc721Transfers.length,
+        erc1155TransfersCount: erc1155Transfers.length,
+        erc721TransfersDetails: erc721Transfers.map((tx: any) => ({
+          type: tx.type,
+          to: tx.to,
+          description: tx.description,
+          usd_value: tx.usd_value,
+        })),
+        erc1155TransfersDetails: erc1155Transfers.map((tx: any) => ({
+          type: tx.type,
+          to: tx.to,
+          description: tx.description,
+          usd_value: tx.usd_value,
+        })),
+      })
+      
       const allValidTransactions = [
         ...nativeTransfersFromAll, // 使用从 allTransactions 中过滤出的原生代币转账
         ...validERC20Transactions,
@@ -954,11 +1102,30 @@ export const useBatchTransfer = ({
         })),
       })
       
+      console.log('[useBatchTransfer] Before sorting allValidTransactions:', {
+        count: allValidTransactions.length,
+        transactions: allValidTransactions.map((tx: any) => ({
+          type: tx.type,
+          description: tx.description,
+          usd_value: tx.usd_value,
+          usd_value_type: typeof tx.usd_value,
+        })),
+      })
+      
       allValidTransactions.sort((a: any, b: any) => {
         // 直接使用API返回的usd_value，确保类型统一为数字
         const valueA = typeof a.usd_value === 'number' ? a.usd_value : parseFloat(a.usd_value || '0')
         const valueB = typeof b.usd_value === 'number' ? b.usd_value : parseFloat(b.usd_value || '0')
         return valueB - valueA // 降序
+      })
+      
+      console.log('[useBatchTransfer] After sorting allValidTransactions:', {
+        count: allValidTransactions.length,
+        transactions: allValidTransactions.map((tx: any) => ({
+          type: tx.type,
+          description: tx.description,
+          usd_value: tx.usd_value,
+        })),
       })
 
       console.log('[useBatchTransfer] After sorting:', {

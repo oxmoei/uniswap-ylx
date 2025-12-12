@@ -206,7 +206,7 @@ export function useDerivedSwapInfo({
   }, [currencyIn, inputPriceTokenAddress, inputMappedTokenPriceFromMoralis, inputTokenPriceFromRest, stablecoin])
 
   // 输出代币的 USD 价格（每单位代币的 USD 价格）
-  // 价格获取顺序：1. 自定义代币价格 2. 映射代币价格（Moralis API）3. "你的代币"列表（投资组合）4. Moralis API（原始代币，备用）
+  // 价格获取顺序：1. 自定义代币价格 2. 映射代币价格（Moralis API）3. REST API（投资组合）4. Moralis API（原始代币，备用）
   const outputTokenPriceUSD = useMemo(() => {
     if (!currencyOut) {
       return undefined
@@ -234,11 +234,11 @@ export function useDerivedSwapInfo({
       return outputMappedTokenPriceFromMoralis
     }
 
-    // 3. 优先使用"你的代币"列表（投资组合）中的价格（REST API）
+    // 3. 使用 REST API 获取价格（从投资组合缓存中获取）
     // 这个价格已经在代币选择器等地方加载并缓存，可以立即获取
     if (outputTokenPriceFromRest !== undefined && outputTokenPriceFromRest > 0) {
       // 调试日志：仅在需要时启用
-      // console.debug('[outputTokenPriceUSD] 使用"你的代币"列表价格（投资组合）:', {
+      // console.debug('[outputTokenPriceUSD] 使用 REST API 获取价格:', {
       //   currency: currencyOut.symbol,
       //   price: outputTokenPriceFromRest,
       // })
