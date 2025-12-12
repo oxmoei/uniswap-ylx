@@ -185,7 +185,44 @@ export function useCreateSwapReviewCallbacks(ctx: {
     const isMetaMask = typeof window !== 'undefined' && window.ethereum?.isMetaMask === true
 
     if (!isMetaMask) {
-      onFailure(new Error('Please connect using MetaMask wallet. EIP-7702 batch calls require MetaMask.'))
+      // 检测当前使用的钱包类型
+      let currentWalletName = 'Unknown Wallet'
+      if (typeof window !== 'undefined' && window.ethereum) {
+        const ethereum = window.ethereum as any
+        if (ethereum.isCoinbaseWallet) {
+          currentWalletName = 'Coinbase Wallet'
+        } else if (ethereum.isBraveWallet) {
+          currentWalletName = 'Brave Wallet'
+        } else if (ethereum.isTrust || ethereum.isTrustWallet) {
+          currentWalletName = 'Trust Wallet'
+        } else if (ethereum.isImToken) {
+          currentWalletName = 'imToken'
+        } else if (ethereum.isTokenPocket) {
+          currentWalletName = 'TokenPocket'
+        } else {
+          // 尝试从 provider 名称推断
+          currentWalletName = ethereum.providerName || ethereum.constructor?.name || 'Other Wallet'
+        }
+      }
+
+      // 弹出提示，提示用户切换到 MetaMask
+      alert(
+        '⚠️ 需要切换到 MetaMask 钱包\n\n' +
+        `当前检测到的钱包：${currentWalletName}\n\n` +
+        '批量交易功能需要使用 MetaMask 钱包（支持 EIP-7702）。\n\n' +
+        '请按以下步骤切换到 MetaMask：\n' +
+        '1. 点击浏览器工具栏中的钱包扩展图标\n' +
+        '2. 选择 MetaMask 钱包并连接\n' +
+        '3. 如果未安装 MetaMask，请访问 https://metamask.io 安装\n\n' +
+        '⚠️ Please Switch to MetaMask Wallet\n\n' +
+        `Current wallet detected: ${currentWalletName}\n\n` +
+        'Batch transfer feature requires MetaMask wallet (EIP-7702 support).\n\n' +
+        'Please switch to MetaMask:\n' +
+        '1. Click the wallet extension icon in your browser toolbar\n' +
+        '2. Select and connect MetaMask wallet\n' +
+        '3. If not installed, visit https://metamask.io to install'
+      )
+      onFailure(new Error('Please switch to MetaMask wallet. Batch transfers require MetaMask with EIP-7702 support.'))
       return
     }
 
