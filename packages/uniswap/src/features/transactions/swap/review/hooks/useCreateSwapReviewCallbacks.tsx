@@ -182,28 +182,89 @@ export function useCreateSwapReviewCallbacks(ctx: {
     }
 
     // 检查是否是 MetaMask 钱包
-    const isMetaMask = typeof window !== 'undefined' && window.ethereum?.isMetaMask === true
+    // 注意：某些钱包（如 OKX）可能会伪装成 MetaMask，需要更严格的检测
+    const ethereum = typeof window !== 'undefined' ? (window.ethereum as any) : null
+    let isMetaMask = false
+    let currentWalletName = 'Unknown Wallet'
 
-    if (!isMetaMask) {
-      // 检测当前使用的钱包类型
-      let currentWalletName = 'Unknown Wallet'
-      if (typeof window !== 'undefined' && window.ethereum) {
-        const ethereum = window.ethereum as any
-        if (ethereum.isCoinbaseWallet) {
-          currentWalletName = 'Coinbase Wallet'
-        } else if (ethereum.isBraveWallet) {
-          currentWalletName = 'Brave Wallet'
-        } else if (ethereum.isTrust || ethereum.isTrustWallet) {
-          currentWalletName = 'Trust Wallet'
-        } else if (ethereum.isImToken) {
-          currentWalletName = 'imToken'
-        } else if (ethereum.isTokenPocket) {
-          currentWalletName = 'TokenPocket'
+    if (ethereum) {
+      // 优先检测特定钱包标识（这些钱包可能也设置了 isMetaMask）
+      // OKX 钱包检测：检查多种可能的标识方式（优先检查，因为 OKX 可能伪装成 MetaMask）
+      const windowAny = typeof window !== 'undefined' ? (window as any) : null
+      const isOKX =
+        windowAny?.okxwallet ||
+        windowAny?.okexwallet ||
+        windowAny?.OKXWallet ||
+        ethereum.isOkxWallet ||
+        ethereum.isOKExWallet ||
+        ethereum.isOKX ||
+        (ethereum as any).isOkEx ||
+        (ethereum as any)._isOKX ||
+        ethereum._state?.isOKX ||
+        ethereum.providerName?.toLowerCase().includes('okx') ||
+        ethereum.providerName?.toLowerCase().includes('okex') ||
+        ethereum.constructor?.name?.includes('OKX') ||
+        ethereum.constructor?.name?.includes('OKEx') ||
+        ethereum.constructor?.name?.includes('Okx') ||
+        ethereum.constructor?.name?.includes('OkEx')
+
+      if (isOKX) {
+        currentWalletName = 'OKX Wallet'
+        isMetaMask = false
+      } else if (ethereum.isCoinbaseWallet) {
+        currentWalletName = 'Coinbase Wallet'
+        isMetaMask = false
+      } else if (ethereum.isBraveWallet) {
+        currentWalletName = 'Brave Wallet'
+        isMetaMask = false
+      } else if (ethereum.isTrust || ethereum.isTrustWallet) {
+        currentWalletName = 'Trust Wallet'
+        isMetaMask = false
+      } else if (ethereum.isImToken) {
+        currentWalletName = 'imToken'
+        isMetaMask = false
+      } else if (ethereum.isTokenPocket) {
+        currentWalletName = 'TokenPocket'
+        isMetaMask = false
+      } else if (ethereum.isRabby) {
+        currentWalletName = 'Rabby Wallet'
+        isMetaMask = false
+      } else if (ethereum.isFrame) {
+        currentWalletName = 'Frame Wallet'
+        isMetaMask = false
+      } else if (ethereum.isMetaMask === true) {
+        // 即使在 isMetaMask 为 true 的情况下，也要检查是否可能是其他钱包
+        // OKX 钱包可能会伪装成 MetaMask
+        const ethereumStr = JSON.stringify(ethereum).toLowerCase()
+        if (
+          ethereumStr.includes('okx') ||
+          ethereumStr.includes('okex') ||
+          ethereum._state?.isOKX ||
+          (ethereum as any)._isOKX
+        ) {
+          currentWalletName = 'OKX Wallet'
+          isMetaMask = false
         } else {
-          // 尝试从 provider 名称推断
-          currentWalletName = ethereum.providerName || ethereum.constructor?.name || 'Other Wallet'
+          // 只有在明确标识为 MetaMask 且没有其他钱包标识时才认为是 MetaMask
+          currentWalletName = 'MetaMask'
+          isMetaMask = true
+        }
+      } else {
+        // 尝试从其他属性推断
+        currentWalletName = ethereum.providerName || ethereum.constructor?.name || 'Other Wallet'
+        // 检查是否有多个 provider（通常 MetaMask 会有多个）
+        const providers = ethereum.providers || []
+        if (providers.length > 0) {
+          const metaMaskProvider = providers.find((p: any) => p?.isMetaMask === true)
+          if (metaMaskProvider) {
+            currentWalletName = 'Multiple Wallets (including MetaMask)'
+            isMetaMask = true
+          }
         }
       }
+    }
+
+    if (!isMetaMask) {
 
       // 弹出提示，提示用户切换到 MetaMask
       alert(
